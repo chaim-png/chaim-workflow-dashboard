@@ -8,7 +8,7 @@ export async function requireMember() {
   const { data } = await supabase.auth.getClaims();
   const userId = data?.claims?.sub;
   if (!userId) redirect("/login");
-  const { data: members } = await supabase.from("team_members").select("*").order("full_name");
+  const { data: members } = await supabase.from("team_members").select("*").neq("role", "removed").order("full_name");
   const me = (members as Member[] | null)?.find((m) => m.user_id === userId);
   if (!me) redirect("/login?error=not-invited");
   return { supabase, me, members: (members ?? []) as Member[] };
