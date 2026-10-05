@@ -12,3 +12,22 @@ export async function changePassword(fd: FormData) {
   if (error) redirect("/account?error=" + encodeURIComponent(error.message));
   redirect("/account?notice=" + encodeURIComponent("Password changed."));
 }
+
+export async function syncGoogleNow() {
+  const { syncGoogle } = await import("@/lib/google-sync");
+  const supabase = await createClient();
+  const results = await syncGoogle(supabase, { force: true });
+  if (!results.length) redirect("/account?error=" + encodeURIComponent("No Google account is connected yet."));
+  const failed = results.find((r) => r.error);
+  if (failed) redirect("/account?error=" + encodeURIComponent(`Pull from ${failed.email} failed: ${failed.error}`));
+  const events = results.reduce((n, r) => n + r.events, 0);
+  const sugg = results.reduce((n, r) => n + r.suggestions, 0);
+  redirect("/account?notice=" + encodeURIComponent(`Pulled ${events} calendar events and ${sugg} new email suggestions.`));
+}
+
+export async function disconnectGoogle() {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("disconnect_google");
+  if (error) redirect("/account?error=" + encodeURIComponent(error.message));
+  redirect("/account?notice=" + encodeURIComponent("Google disconnected. The dashboard no longer reads your Gmail or Calendar."));
+}

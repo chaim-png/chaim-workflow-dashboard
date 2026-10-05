@@ -51,3 +51,18 @@ npm install
 npm run dev
 npm run typecheck
 ```
+
+## Gmail and Google Calendar (live pull)
+
+The dashboard reads Gmail and Calendar itself, read-only, through a Google OAuth client.
+
+- Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in Vercel (Production). The redirect URI registered on the
+  client must be `https://chaim-workflow-dashboard.vercel.app/api/google/callback`.
+- A member clicks **Connect Google** on the Account page. The refresh token is encrypted (AES-256-GCM, key derived
+  from the client secret) before it is stored in `google_connections`, which is reachable only through the
+  security-definer functions in `0005_google_connection.sql`.
+- Whenever anyone opens the dashboard and the last pull is over 10 minutes old, it pulls the next 14 days of
+  calendar events and new inbox threads after the page is sent (`lib/google-sync.ts`). **Pull now** forces it.
+- New threads become suggestions only (follow-ups with a draft for Nadine, or tasks for Property24 leads). Nothing is
+  sent, and newsletters, no-reply senders, group broadcasts and threads already on the dashboard are skipped.
+  Live pulls log to `sync_runs` as `gmail-live` / `calendar-live`, so the scheduled Claude sync keeps its own window.

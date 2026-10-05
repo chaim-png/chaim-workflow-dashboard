@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { after } from "next/server";
+import { syncGoogle } from "@/lib/google-sync";
 import { requireMember } from "@/lib/session";
 import { signOut } from "@/app/actions";
 import { NavLinks } from "@/components/nav-links";
@@ -9,6 +11,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     .from("suggestions")
     .select("id", { count: "exact", head: true })
     .eq("status", "pending");
+  // Keep Gmail and Calendar fresh: after the page is sent, pull if the last pull is over 10 minutes old.
+  after(() => syncGoogle(supabase).catch(() => {}));
 
   return (
     <div className="min-h-screen">
