@@ -99,3 +99,24 @@ export type Meeting = {
   action_items: { text: string; owner?: string; due?: string }[];
   url: string | null;
 };
+
+export type WhatsAppContact = {
+  id: string;
+  display_phone: string;
+  wa_id: string;
+  name: string | null;
+  status: "unsorted" | "client" | "personal";
+  client_id: string | null;
+  message_count: number;
+  last_message_at: string | null;
+  clients?: { id: string; name: string } | null;
+};
+
+export type WhatsAppMessage = {
+  id: string;
+  contact_id: string;
+  direction: "in" | "out";
+  sent_at: string;
+  type: string;
+  body: string | null;
+};

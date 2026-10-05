@@ -51,3 +51,26 @@ npm install
 npm run dev
 npm run typecheck
 ```
+
+## WhatsApp
+
+Chaim's and Nadine's numbers run the WhatsApp Business app connected to Meta's Cloud API in
+"coexistence" mode through Dualhook, whose Webhook Override sends Meta's events straight to the
+`whatsapp-webhook` edge function. Group chats are not available through coexistence.
+
+- **Privacy rule:** message text is stored only for contacts marked `client`. `unsorted` contacts
+  keep only name and number (text is kept for `whatsapp_settings.unsorted_hold_hours`, default 0,
+  then wiped). Nothing is stored for `personal` contacts, and marking a contact personal wipes its
+  text. A trigger on `whatsapp_messages` enforces this whatever the writer does.
+- **Who sees what:** client chats are shared with the team; unsorted and personal contacts only
+  with the person whose number it is (`whatsapp_numbers.owner`). Only the owner can sort a contact.
+- **Endpoint:** `https://<project>.supabase.co/functions/v1/whatsapp-webhook/<path_secret>`, with
+  `path_secret` and `verify_token` in the one-row `whatsapp_webhook_secret` table (service role
+  only; set at go-live, never committed). Deployed with `verify_jwt = false`. Events are only
+  accepted for numbers listed in `whatsapp_numbers`; the first event fills in `phone_number_id`.
+
+**For the sync:** read new client messages with
+`select ... from whatsapp_messages m join whatsapp_contacts c on c.id = m.contact_id where c.status = 'client' and m.processed_at is null`,
+write suggestions with `source = 'whatsapp'`, `source_ref = 'wa:' || contact_id || ':' || <date>`
+and `suggested_assignee` = the number's owner, then set `processed_at = now()` on those rows and
+call `select public.whatsapp_purge_unsorted();`.

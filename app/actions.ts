@@ -263,3 +263,17 @@ export async function signOut() {
   await supabase.auth.signOut();
   redirect("/login");
 }
+
+// ---------- WhatsApp ----------
+
+export async function sortWhatsAppContact(fd: FormData) {
+  const { supabase } = await db();
+  const id = str(fd, "id")!;
+  const patch: Record<string, unknown> = {};
+  const status = str(fd, "status");
+  if (status === "client" || status === "personal" || status === "unsorted") patch.status = status;
+  if (fd.has("client_id")) patch.client_id = str(fd, "client_id");
+  const { error } = await supabase.from("whatsapp_contacts").update(patch).eq("id", id);
+  if (error) throw new Error(error.message);
+  done(str(fd, "redirect_to"));
+}
