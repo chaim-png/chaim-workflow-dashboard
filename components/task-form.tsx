@@ -1,5 +1,5 @@
 import type { Client, Member } from "@/lib/types";
-import { btnCls, inputCls, MemberSelect } from "@/components/ui";
+import { btnCls, inputCls, MemberSelect, UrgencySelect } from "@/components/ui";
 import { createTask } from "@/app/actions";
 
 export function NewTaskForm({ members, clients, me, clientId, redirectTo }: {
@@ -10,10 +10,9 @@ export function NewTaskForm({ members, clients, me, clientId, redirectTo }: {
       <input name="title" required placeholder="What needs doing?" className={`${inputCls} sm:col-span-6`} />
       <textarea name="details" placeholder="Details (optional)" rows={2} className={`${inputCls} sm:col-span-6`} />
       <MemberSelect members={members} defaultValue={me} className={`${inputCls} sm:col-span-2`} />
-      <input name="due_date" type="date" className={`${inputCls} sm:col-span-1`} />
-      <select name="priority" defaultValue="normal" className={`${inputCls} sm:col-span-1`}>
-        <option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option>
-      </select>
+      <input name="due_date" type="date" aria-label="Due date" className={`${inputCls} sm:col-span-2`} />
+      <input name="due_time" type="time" aria-label="Due time" className={`${inputCls} sm:col-span-1`} />
+      <UrgencySelect name="priority" className={`${inputCls} sm:col-span-1`} />
       {clientId ? <input type="hidden" name="client_id" value={clientId} /> : (
         <>
           <select name="client_id" defaultValue="" className={`${inputCls} sm:col-span-2`}>

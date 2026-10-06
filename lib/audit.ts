@@ -6,10 +6,12 @@ const TABLE_NOUN: Record<string, string> = {
 };
 
 const FIELD_LABEL: Record<string, string> = {
-  title: "title", details: "details", assignee: "assignee", status: "status", priority: "priority",
+  title: "title", details: "details", assignee: "assignee", status: "status", priority: "urgency", urgency: "urgency", due_time: "due time", next_action_time: "chase time", suggested_time: "time", suggested_due: "due date", suggested_assignee: "assignee",
   due_date: "due date", waiting_on: "waiting on", client_id: "client", body: "text", matter: "matter",
   next_action_on: "next action date", draft: "draft", what: "description", name: "name", notes: "notes", kind: "type",
 };
+
+const URGENCY_NAME: Record<string, string> = { low: "Low", medium: "Medium", urgent: "Urgent", normal: "Medium", high: "Urgent" };
 
 const HIDDEN = new Set(["completed_at", "decided_by", "decided_at", "result_id", "task_id", "deleted_at"]);
 
@@ -23,6 +25,8 @@ export function fmtValue(field: string, v: unknown, members: Member[], clientNam
   if (v === null || v === undefined || v === "") return "empty";
   if (field === "client_id") return clientNames?.[String(v)] ?? "a client";
   if (field === "assignee") return memberName(members, String(v));
+  if (field === "priority" || field === "urgency") return URGENCY_NAME[String(v)] ?? String(v);
+  if (/_time$/.test(field)) return String(v).slice(0, 5);
   if (field === "status") return ({ todo: "To do", in_progress: "In progress", waiting: "Waiting", done: "Done" } as Record<string, string>)[String(v)] ?? String(v);
   return String(v).length > 80 ? String(v).slice(0, 80) + "…" : String(v);
 }

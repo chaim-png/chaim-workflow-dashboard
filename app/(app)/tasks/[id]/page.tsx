@@ -2,11 +2,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireMember } from "@/lib/session";
 import { nameForUser } from "@/lib/people";
-import { fmtDateTime } from "@/lib/dates";
+import { dueLabel, fmtDateTime, hhmm } from "@/lib/dates";
 import type { AuditEntry, Client, Task } from "@/lib/types";
 import { describeChange, fmtValue } from "@/lib/audit";
 import { addComment, deleteComment, deleteTask, restoreTask, updateTask } from "@/app/actions";
-import { Badge, Card, DueBadge, Empty, MemberSelect, SourceBadge, StatusBadge, btnCls, btnGhost, inputCls } from "@/components/ui";
+import { Badge, Card, Empty, MemberSelect, SourceBadge, StatusBadge, UrgencyBadge, UrgencySelect, btnCls, btnGhost, inputCls } from "@/components/ui";
+
+const FIELD_NAME: Record<string, string> = { priority: "urgency", due_date: "due date", due_time: "due time", client_id: "client", waiting_on: "waiting on" };
 
 type Comment = { id: string; body: string; author: string; created_at: string; deleted_at: string | null };
 
@@ -28,6 +30,7 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
   const fullHistory = [...((history ?? []) as AuditEntry[]), ...((commentHistory ?? []) as AuditEntry[])]
     .sort((a, b) => b.changed_at.localeCompare(a.changed_at));
   const creator = nameForUser(members, t.created_by);
+  const due = dueLabel(t.due_date, t.due_time, t.status === "done");
   const clientNames = Object.fromEntries(((clients ?? []) as Client[]).map((c) => [c.id, c.name]));
 
   return (
@@ -48,7 +51,8 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
               <input name="title" defaultValue={t.title} required className={`${inputCls} w-full text-base font-semibold`} />
               <div className="flex flex-wrap items-center gap-1.5">
                 <StatusBadge status={t.status} />
-                <DueBadge due={t.due_date} status={t.status} />
+                <Badge t={due.tone}>{due.text}</Badge>
+                <UrgencyBadge u={t.priority} />
                 {t.clients && <Link href={`/clients/${t.clients.id}`}><Badge t="accent">{t.clients.name}</Badge></Link>}
                 <SourceBadge source={t.source} url={t.source_url} />
               </div>
@@ -63,13 +67,14 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
                 <label className="text-xs text-[var(--muted)]">Assigned to
                   <MemberSelect members={members} defaultValue={t.assignee} className={`${inputCls} mt-1 w-full`} />
                 </label>
-                <label className="text-xs text-[var(--muted)]">Due
-                  <input name="due_date" type="date" defaultValue={t.due_date ?? ""} className={`${inputCls} mt-1 w-full`} />
+                <label className="text-xs text-[var(--muted)]">Due date and time
+                  <span className="mt-1 flex gap-1.5">
+                    <input name="due_date" type="date" defaultValue={t.due_date ?? ""} className={`${inputCls} min-w-0 flex-1`} />
+                    <input name="due_time" type="time" defaultValue={hhmm(t.due_time)} className={`${inputCls} w-28`} />
+                  </span>
                 </label>
-                <label className="text-xs text-[var(--muted)]">Priority
-                  <select name="priority" defaultValue={t.priority} className={`${inputCls} mt-1 w-full`}>
-                    <option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option>
-                  </select>
+                <label className="text-xs text-[var(--muted)]">Urgency
+                  <UrgencySelect name="priority" defaultValue={t.priority} className={`${inputCls} mt-1 w-full`} />
                 </label>
                 <label className="text-xs text-[var(--muted)]">Client / matter
                   <select name="client_id" defaultValue={t.client_id ?? ""} className={`${inputCls} mt-1 w-full`}>
@@ -142,7 +147,7 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
                   {h.action === "update" && h.table_name === "tasks" && (
                     <ul className="mt-1 space-y-0.5 text-xs text-[var(--muted)]">
                       {(h.changed_fields ?? []).filter((f) => f !== "completed_at").map((f) => (
-                        <li key={f}>{f.replace("_", " ")}: <s>{fmtValue(f, h.old_data?.[f], members, clientNames)}</s> → {fmtValue(f, h.new_data?.[f], members, clientNames)}</li>
+                        <li key={f}>{FIELD_NAME[f] ?? f.replace(/_/g, " ")}: <s>{fmtValue(f, h.old_data?.[f], members, clientNames)}</s> → {fmtValue(f, h.new_data?.[f], members, clientNames)}</li>
                       ))}
                     </ul>
                   )}

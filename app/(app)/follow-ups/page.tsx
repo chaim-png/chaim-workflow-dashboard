@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { requireMember } from "@/lib/session";
-import { firstName } from "@/lib/people";
-import { daysSince, fmtDate } from "@/lib/dates";
+import { daysSince, dueLabel, hhmm } from "@/lib/dates";
+import { followUpCompose } from "@/lib/mail";
 import type { Client, FollowUp } from "@/lib/types";
 import { createFollowUp, followUpToTask, updateFollowUp } from "@/app/actions";
-import { Badge, Card, Empty, MemberSelect, SourceBadge, btnCls, btnGhost, inputCls } from "@/components/ui";
+import { Badge, Card, Empty, MemberSelect, Person, SourceBadge, UrgencyBadge, UrgencySelect, btnCls, btnGhost, inputCls } from "@/components/ui";
 import { CopyButton } from "@/components/copy-button";
 
 export default async function FollowUpsPage({ searchParams }: { searchParams: Promise<{ show?: string }> }) {
@@ -44,7 +44,10 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
           <textarea name="draft" rows={3} placeholder="Draft message (optional)" className={`${inputCls} sm:col-span-6`} />
           <MemberSelect members={members} className={`${inputCls} sm:col-span-2`} />
           <label className="text-xs text-[var(--muted)] sm:col-span-2">Asked on<input name="asked_on" type="date" className={`${inputCls} mt-1 w-full`} /></label>
-          <label className="text-xs text-[var(--muted)] sm:col-span-2">Chase on<input name="next_action_on" type="date" className={`${inputCls} mt-1 w-full`} /></label>
+          <label className="text-xs text-[var(--muted)] sm:col-span-2">Chase on
+            <span className="mt-1 flex gap-1.5"><input name="next_action_on" type="date" className={`${inputCls} min-w-0 flex-1`} /><input name="next_action_time" type="time" className={`${inputCls} w-24`} /></span>
+          </label>
+          <label className="text-xs text-[var(--muted)] sm:col-span-3">Urgency<UrgencySelect className={`${inputCls} mt-1 w-full`} /></label>
           <select name="client_id" defaultValue="" className={`${inputCls} sm:col-span-3`}>
             <option value="">No client / matter</option>
             {((clients ?? []) as Client[]).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -69,12 +72,14 @@ function Section({ title, items, members }: { title: string; items: FollowUp[]; 
             return (
               <li key={f.id} className="py-3">
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="font-medium text-sm">{f.matter}</span>
+                  <Link href={`/follow-ups/${f.id}`} className="font-medium text-sm hover:text-[var(--accent)]">{f.matter}</Link>
+                  <UrgencyBadge u={f.urgency} quiet />
                   {f.contact_name && <span className="text-sm text-[var(--muted)]">· {f.contact_name}</span>}
                   {age !== null && <Badge t={f.status === "done" ? "muted" : age > 5 ? "bad" : "warn"}>{age === 0 ? "today" : `${age} days`}</Badge>}
-                  {f.next_action_on && <Badge>chase {fmtDate(f.next_action_on)}</Badge>}
+                  {f.next_action_on && <Badge t={dueLabel(f.next_action_on, f.next_action_time).tone}>chase {dueLabel(f.next_action_on, f.next_action_time).text.toLowerCase()}</Badge>}
+                  {f.clients && <Badge t="accent">{f.clients.name}</Badge>}
                   <SourceBadge source={f.source} url={f.source_url} />
-                  <Badge>{firstName(members, f.assignee)}</Badge>
+                  <span className="ml-auto"><Person members={members} email={f.assignee} /></span>
                 </div>
                 {f.what && <p className="mt-1 text-sm text-[var(--muted)]">{f.what}</p>}
                 {f.draft && (
@@ -85,13 +90,15 @@ function Section({ title, items, members }: { title: string; items: FollowUp[]; 
                 )}
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   {f.draft && <CopyButton text={f.draft} />}
-                  {f.contact_email && f.draft && (
-                    <a className={btnGhost} href={`mailto:${f.contact_email}?subject=${encodeURIComponent(f.matter)}&body=${encodeURIComponent(f.draft)}`}>Open in mail app</a>
+                  {(f.contact_email || f.draft) && (
+                    <a className={btnGhost} href={followUpCompose(f)} target="_blank" rel="noreferrer">Draft follow-up in Gmail</a>
                   )}
                   <form action={updateFollowUp} className="flex items-center gap-2">
                     <input type="hidden" name="id" value={f.id} />
                     <MemberSelect members={members} defaultValue={f.assignee} />
-                    <input type="date" name="next_action_on" defaultValue={f.next_action_on ?? ""} className={inputCls} />
+                    <input type="date" name="next_action_on" defaultValue={f.next_action_on ?? ""} className={inputCls} aria-label="Chase on" />
+                    <input type="time" name="next_action_time" defaultValue={hhmm(f.next_action_time)} className={`${inputCls} w-24`} aria-label="Chase time" />
+                    <UrgencySelect defaultValue={f.urgency} />
                     <button className={btnGhost}>Save</button>
                   </form>
                   {f.task_id ? <Link href={`/tasks/${f.task_id}`} className="text-sm text-[var(--accent)]">Open task</Link> : (

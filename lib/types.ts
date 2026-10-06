@@ -1,5 +1,7 @@
 export type Member = { email: string; full_name: string; role: string; user_id: string | null };
 
+export type Urgency = "low" | "medium" | "urgent";
+
 export type TaskStatus = "todo" | "in_progress" | "waiting" | "done";
 export type Source = "manual" | "email" | "calendar" | "granola" | "plaud" | "whatsapp" | "kb";
 
@@ -12,8 +14,9 @@ export type Task = {
   client_id: string | null;
   assignee: string | null;
   status: TaskStatus;
-  priority: "low" | "normal" | "high";
+  priority: Urgency;
   due_date: string | null;
+  due_time: string | null;
   waiting_on: string | null;
   source: Source;
   source_ref: string | null;
@@ -39,9 +42,14 @@ export type FollowUp = {
   assignee: string | null;
   status: "open" | "done" | "snoozed";
   next_action_on: string | null;
+  next_action_time: string | null;
+  urgency: Urgency;
   task_id: string | null;
   source: Source;
+  source_ref: string | null;
   source_url: string | null;
+  created_at: string;
+  deleted_at: string | null;
   clients?: { id: string; name: string } | null;
 };
 
@@ -55,6 +63,8 @@ export type Suggestion = {
   contact_email: string | null;
   suggested_assignee: string | null;
   suggested_due: string | null;
+  suggested_time: string | null;
+  urgency: Urgency;
   draft: string | null;
   source: Source;
   source_ref: string | null;
@@ -88,11 +98,13 @@ export type CalendarEvent = {
   location: string | null;
   attendees: string | null;
   url: string | null;
+  declined?: boolean;
 };
 
 export type Meeting = {
   id: string;
   source: "granola" | "plaud";
+  source_ref: string;
   title: string;
   occurred_at: string | null;
   summary: string | null;

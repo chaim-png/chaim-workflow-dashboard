@@ -1,5 +1,4 @@
-import Link from "next/link";
-import type { Source, Task, TaskStatus, Member } from "@/lib/types";
+import type { Source, TaskStatus, Member, Urgency } from "@/lib/types";
 import { fmtDate, todayISO } from "@/lib/dates";
 import { firstName } from "@/lib/people";
 
@@ -65,20 +64,37 @@ export function StatusBadge({ status }: { status: TaskStatus }) {
   return <Badge t={t}>{STATUS_LABEL[status]}</Badge>;
 }
 
-export function TaskRow({ task, members }: { task: Task; members: Member[] }) {
+export const URGENCY_LABEL: Record<Urgency, string> = { low: "Low", medium: "Medium", urgent: "Urgent" };
+export const URGENCY_RANK: Record<Urgency, number> = { urgent: 0, medium: 1, low: 2 };
+
+export function UrgencyBadge({ u, quiet }: { u: Urgency; quiet?: boolean }) {
+  if (quiet && u === "medium") return null;
+  const t = u === "urgent" ? "bad" : u === "low" ? "muted" : "info";
+  return <Badge t={t}>{u === "urgent" ? "● " : ""}{URGENCY_LABEL[u]}</Badge>;
+}
+
+export function UrgencySelect({ name = "urgency", defaultValue = "medium", className = inputCls }: { name?: string; defaultValue?: Urgency; className?: string }) {
   return (
-    <li className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-[var(--line)] py-2.5 last:border-0">
-      <Link href={`/tasks/${task.id}`} className={`min-w-0 flex-1 text-sm hover:text-[var(--accent)] ${task.status === "done" ? "line-through text-[var(--muted)]" : ""}`}>
-        {task.priority === "high" && <span className="mr-1 text-[var(--bad)]" title="High priority">●</span>}
-        {task.title}
-      </Link>
-      <div className="flex flex-wrap items-center gap-1.5">
-        {task.clients && <Badge t="accent">{task.clients.name}</Badge>}
-        <DueBadge due={task.due_date} status={task.status} />
-        {task.status !== "todo" && <StatusBadge status={task.status} />}
-        <Badge>{firstName(members, task.assignee)}</Badge>
-      </div>
-    </li>
+    <select name={name} defaultValue={defaultValue} className={className} aria-label="Urgency">
+      <option value="low">Low</option><option value="medium">Medium</option><option value="urgent">Urgent</option>
+    </select>
+  );
+}
+
+const AVATAR = ["#2f5d50", "#2b5a8a", "#8a5a00", "#7a3b69", "#a3302a"];
+
+/** Initials chip plus first name, so the "who" column reads at a glance. */
+export function Person({ members, email }: { members: Member[]; email: string | null | undefined }) {
+  if (!email) return <span className="text-xs text-[var(--muted)]">Unassigned</span>;
+  const name = firstName(members, email);
+  const full = members.find((m) => m.email === email)?.full_name ?? email;
+  const initials = full.split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase();
+  const color = AVATAR[[...email].reduce((a, c) => a + c.charCodeAt(0), 0) % AVATAR.length];
+  return (
+    <span className="inline-flex items-center gap-1.5 text-sm" title={full}>
+      <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-[10px] font-semibold text-white" style={{ background: color }}>{initials}</span>
+      {name}
+    </span>
   );
 }
 

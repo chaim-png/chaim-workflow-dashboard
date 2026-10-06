@@ -5,7 +5,8 @@ import { firstName } from "@/lib/people";
 import { daysSince } from "@/lib/dates";
 import type { Client, FollowUp, Task } from "@/lib/types";
 import { updateClientRecord } from "@/app/actions";
-import { Badge, Card, Empty, TaskRow, btnGhost, inputCls } from "@/components/ui";
+import { Badge, Card, Empty, btnGhost, inputCls } from "@/components/ui";
+import { TodoTable, sortItems, taskItem } from "@/components/todo";
 import { NewTaskForm } from "@/components/task-form";
 
 export default async function ClientPage({ params }: { params: Promise<{ id: string }> }) {
@@ -28,7 +29,7 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
           <Card title={`Open tasks (${open.length})`}>
-            {open.length === 0 ? <Empty>No open tasks.</Empty> : <ul>{open.map((t) => <TaskRow key={t.id} task={t} members={members} />)}</ul>}
+            <TodoTable items={sortItems(open.map(taskItem), "due")} members={members} me={me.email} empty="No open tasks." />
             <details className="mt-3">
               <summary className="cursor-pointer text-sm text-[var(--accent)]">+ Add a task for {c.name}</summary>
               <div className="mt-2"><NewTaskForm members={members} clients={[]} me={me.email} clientId={c.id} redirectTo={`/clients/${c.id}`} /></div>
@@ -39,7 +40,7 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
               <ul className="divide-y divide-[var(--line)] text-sm">
                 {((fus ?? []) as FollowUp[]).map((f) => (
                   <li key={f.id} className="flex flex-wrap items-center gap-2 py-2">
-                    <span className="flex-1">{f.direction === "they_wait_on_us" ? "Waiting on us" : "We wait on"}: {f.contact_name ?? f.matter}<span className="block text-xs text-[var(--muted)]">{f.what}</span></span>
+                    <Link href={`/follow-ups/${f.id}`} className="flex-1 hover:text-[var(--accent)]">{f.direction === "they_wait_on_us" ? "Waiting on us" : "We wait on"}: {f.contact_name ?? f.matter}<span className="block text-xs text-[var(--muted)]">{f.what}</span></Link>
                     {f.asked_on && <Badge>{daysSince(f.asked_on)} days</Badge>}
                     <Badge>{firstName(members, f.assignee)}</Badge>
                   </li>
@@ -48,7 +49,7 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
             )}
           </Card>
           {closed.length > 0 && (
-            <Card title={`Done (${closed.length})`}><ul>{closed.map((t) => <TaskRow key={t.id} task={t} members={members} />)}</ul></Card>
+            <Card title={`Done (${closed.length})`}><TodoTable items={closed.map(taskItem)} members={members} me={me.email} /></Card>
           )}
         </div>
         <Card title="Details">

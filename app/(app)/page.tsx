@@ -1,50 +1,71 @@
 import Link from "next/link";
 import { requireMember } from "@/lib/session";
 import { firstName } from "@/lib/people";
-import { dayBoundsUTC, daysSince, endOfWeekISO, fmtDate, fmtDateTime, fmtTime, todayISO } from "@/lib/dates";
-import type { CalendarEvent, FollowUp, Suggestion, Task, AuditEntry } from "@/lib/types";
-import { Badge, Card, Empty, SourceBadge, TaskRow } from "@/components/ui";
+import { addDays, dayBoundsUTC, endOfWeekISO, fmtAddress, fmtDate, fmtDateTime, fmtTime, todayISO } from "@/lib/dates";
+import type { CalendarEvent, FollowUp, Member, Suggestion, Task, AuditEntry } from "@/lib/types";
+import { Badge, Card, Empty, SourceBadge } from "@/components/ui";
+import { SORTS, TodoTable, eventItem, followUpItem, sortItems, taskItem, type SortKey, type TodoItem } from "@/components/todo";
 import { describeChange } from "@/lib/audit";
 
-export default async function SummaryPage({ searchParams }: { searchParams: Promise<{ who?: string }> }) {
+export default async function SummaryPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const { supabase, me, members } = await requireMember();
   const sp = await searchParams;
   const who = sp.who === "all" ? "all" : sp.who && members.some((m) => m.email === sp.who) ? sp.who : me.email;
+  const urg = sp.u === "urgent" || sp.u === "medium" ? sp.u : "all";
+  const show = sp.show === "tasks" || sp.show === "follow_ups" ? sp.show : "all";
+  const sort = (SORTS.some((x) => x.v === sp.sort) ? sp.sort : "due") as SortKey;
   const today = todayISO();
+  const tomorrow = addDays(today, 1);
   const weekEnd = endOfWeekISO();
   const [dayStart, dayEnd] = dayBoundsUTC(today);
+  const owner = members.find((m) => m.role === "owner")?.email ?? null;
 
   let taskQ = supabase.from("tasks").select("*, clients(id,name)").is("deleted_at", null).neq("status", "done");
   if (who !== "all") taskQ = taskQ.eq("assignee", who);
-  const [{ data: tasks }, { data: events }, { data: suggestions }, { data: followUps }, { data: activity }, { data: lastSync }] =
+  const [{ data: tasks }, { data: events }, { data: suggestions }, { data: followUps }, { data: activity }, { data: lastSync }, { data: tracked }] =
     await Promise.all([
-      taskQ.order("due_date", { ascending: true, nullsFirst: false }),
+      taskQ,
       supabase.from("calendar_events").select("*").gte("starts_at", dayStart).lte("starts_at", dayEnd).order("starts_at"),
       supabase.from("suggestions").select("*").eq("status", "pending").order("source_date", { ascending: false }).limit(5),
       supabase.from("follow_ups").select("*, clients(id,name)").is("deleted_at", null).eq("status", "open").order("asked_on"),
       supabase.from("audit_log").select("*").order("changed_at", { ascending: false }).limit(8),
       supabase.from("sync_runs").select("ran_at").order("ran_at", { ascending: false }).limit(1),
+      supabase.from("tasks").select("source_ref").eq("source", "calendar").is("deleted_at", null).gte("due_date", today),
     ]);
 
-  const all = (tasks ?? []) as Task[];
-  const overdue = all.filter((t) => t.due_date && t.due_date < today);
-  const dueToday = all.filter((t) => t.due_date === today);
-  const thisWeek = all.filter((t) => t.due_date && t.due_date > today && t.due_date <= weekEnd);
-  const waiting = all.filter((t) => t.status === "waiting");
-  const noDate = all.filter((t) => !t.due_date && t.status !== "waiting");
-  const fu = (followUps ?? []) as FollowUp[];
-  const theyWait = fu.filter((f) => f.direction === "they_wait_on_us" && (who === "all" || !f.assignee || f.assignee === who));
+  const todaysEvents = ((events ?? []) as CalendarEvent[]).filter((e) => !e.declined);
+  const trackedIds = new Set((tracked ?? []).map((t: { source_ref: string }) => t.source_ref));
+  const fu = ((followUps ?? []) as FollowUp[]).filter((f) => who === "all" || f.assignee === who || (!f.assignee && who === me.email));
+  const urgOk = (u: string) => urg === "all" || u === "urgent" || (urg === "medium" && u === "medium");
+  const items: TodoItem[] = [
+    ...(show !== "follow_ups" ? ((tasks ?? []) as Task[]).map(taskItem) : []),
+    ...(show !== "tasks" ? fu.filter((f) => f.next_action_on).map(followUpItem) : []),
+    ...(show !== "follow_ups" && (who === "all" || who === owner)
+      ? todaysEvents.filter((e) => !trackedIds.has(e.id)).map((e) => eventItem(e, owner))
+      : []),
+  ].filter((i) => urgOk(i.urgency) || i.kind === "calendar");
+  const sorted = sortItems(items, sort);
+  const waitingTask = (i: TodoItem) => i.kind === "task" && i.status === "waiting";
+  const overdue = sorted.filter((i) => i.due_date && i.due_date < today && !waitingTask(i));
+  const dueToday = sorted.filter((i) => i.due_date === today && !waitingTask(i));
+  const dueTomorrow = sorted.filter((i) => i.due_date === tomorrow && !waitingTask(i));
+  const thisWeek = sorted.filter((i) => i.due_date && i.due_date > tomorrow && i.due_date <= weekEnd && !waitingTask(i));
+  const later = sorted.filter((i) => i.due_date && i.due_date > weekEnd && !waitingTask(i));
+  const waiting = sorted.filter(waitingTask);
+  const noDate = sorted.filter((i) => !i.due_date && !waitingTask(i));
+  const theyWait = fu.filter((f) => f.direction === "they_wait_on_us" && !f.next_action_on).map(followUpItem);
   const { count: pendingCount } = await supabase.from("suggestions").select("id", { count: "exact", head: true }).eq("status", "pending");
 
   const whoLabel = who === "all" ? "Everyone" : firstName(members, who);
   const tiles = [
-    { label: "Overdue", n: overdue.length, t: overdue.length ? "bad" : "muted", href: "/tasks?view=overdue" },
-    { label: "Due today", n: dueToday.length, t: dueToday.length ? "warn" : "muted", href: "/tasks?view=today" },
-    { label: "Rest of this week", n: thisWeek.length, t: "muted", href: "/tasks?view=week" },
-    { label: "Waiting on others", n: waiting.length, t: "muted", href: "/tasks?view=waiting" },
+    { label: "Overdue", n: overdue.length, t: overdue.length ? "bad" : "muted", href: "#overdue" },
+    { label: "Due today", n: dueToday.length, t: dueToday.length ? "warn" : "muted", href: "#today" },
+    { label: "Urgent", n: items.filter((i) => i.urgency === "urgent").length, t: items.some((i) => i.urgency === "urgent") ? "bad" : "muted", href: link(sp, { u: "urgent" }) },
+    { label: "Tomorrow", n: dueTomorrow.length, t: "muted", href: "#tomorrow" },
     { label: "People waiting on us", n: theyWait.length, t: theyWait.length ? "warn" : "muted", href: "/follow-ups" },
     { label: "Suggestions to review", n: pendingCount ?? 0, t: pendingCount ? "accent" : "muted", href: "/suggestions" },
   ];
+  const pill = (active: boolean) => `rounded-lg px-2.5 py-1.5 ${active ? "bg-[var(--accent-bg)] text-[var(--accent)] font-medium" : "text-[var(--muted)] hover:text-[var(--text)]"}`;
 
   return (
     <div className="space-y-6">
@@ -58,10 +79,7 @@ export default async function SummaryPage({ searchParams }: { searchParams: Prom
         </div>
         <div className="flex gap-1 text-sm">
           {[...members.map((m) => ({ v: m.email, l: m.full_name.split(" ")[0] })), { v: "all", l: "Everyone" }].map((o) => (
-            <Link key={o.v} href={`/?who=${encodeURIComponent(o.v)}`}
-              className={`rounded-lg px-2.5 py-1.5 ${who === o.v ? "bg-[var(--accent-bg)] text-[var(--accent)] font-medium" : "text-[var(--muted)]"}`}>
-              {o.l}
-            </Link>
+            <Link key={o.v} href={link(sp, { who: o.v })} className={pill(who === o.v)}>{o.l}</Link>
           ))}
         </div>
       </div>
@@ -75,40 +93,51 @@ export default async function SummaryPage({ searchParams }: { searchParams: Prom
         ))}
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        <div className="space-y-6 lg:col-span-2">
+      <div className="space-y-6">
+        <div className="space-y-6">
           <Card title="To do" action={<Link href="/tasks?new=1" className="text-sm text-[var(--accent)]">+ New task</Link>}>
-            <Group label="Overdue" tasks={overdue} members={members} />
-            <Group label="Today" tasks={dueToday} members={members} />
-            <Group label="Rest of this week" tasks={thisWeek} members={members} />
-            <Group label="Waiting on someone" tasks={waiting} members={members} />
-            <Group label="No due date" tasks={noDate} members={members} collapsed />
-            {all.length === 0 && <Empty>Nothing open. Enjoy it.</Empty>}
+            <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
+              <span className="flex gap-1">
+                {([["all", "Everything"], ["tasks", "Tasks"], ["follow_ups", "Follow-ups"]] as const).map(([v, l]) => (
+                  <Link key={v} href={link(sp, { show: v === "all" ? "" : v })} className={pill(show === v)}>{l}</Link>
+                ))}
+              </span>
+              <span className="flex gap-1">
+                {([["all", "Any urgency"], ["medium", "Medium and urgent"], ["urgent", "Urgent only"]] as const).map(([v, l]) => (
+                  <Link key={v} href={link(sp, { u: v === "all" ? "" : v })} className={pill(urg === v)}>{l}</Link>
+                ))}
+              </span>
+              <div className="flex flex-wrap items-center gap-1.5 text-xs text-[var(--muted)] lg:ml-auto">Sort by
+                <SortSelect sp={sp} sort={sort} />
+              </div>
+            </div>
+            <Group id="overdue" label="Overdue" items={overdue} members={members} me={me.email} />
+            <Group id="today" label="Today" items={dueToday} members={members} me={me.email} empty="Nothing due today." />
+            <Group id="tomorrow" label="Tomorrow" items={dueTomorrow} members={members} me={me.email} />
+            <Group id="week" label="Rest of this week" items={thisWeek} members={members} me={me.email} />
+            <Group id="waiting" label="Waiting on someone" items={waiting} members={members} me={me.email} />
+            <Group id="later" label="Later" items={later} members={members} me={me.email} collapsed />
+            <Group id="nodate" label="No due date" items={noDate} members={members} me={me.email} collapsed />
+            {items.length === 0 && <Empty>Nothing open. Enjoy it.</Empty>}
           </Card>
 
-          <Card title="People waiting on us" action={<Link href="/follow-ups" className="text-sm text-[var(--accent)]">All follow-ups</Link>}>
-            {theyWait.length === 0 ? <Empty>Nobody is waiting.</Empty> : (
-              <ul>
-                {theyWait.slice(0, 8).map((f) => (
-                  <li key={f.id} className="flex flex-wrap items-center gap-2 border-b border-[var(--line)] py-2 last:border-0 text-sm">
-                    <span className="flex-1 min-w-0"><b className="font-medium">{f.matter}</b>{f.contact_name && <> · {f.contact_name}</>}<span className="block text-xs text-[var(--muted)]">{f.what}</span></span>
-                    {f.asked_on && <Badge t={(daysSince(f.asked_on) ?? 0) > 5 ? "bad" : "warn"}>{daysSince(f.asked_on)} days</Badge>}
-                    <Badge>{firstName(members, f.assignee)}</Badge>
-                  </li>
-                ))}
-              </ul>
-            )}
+          <Card title="People waiting on us (no chase date yet)" action={<Link href="/follow-ups" className="text-sm text-[var(--accent)]">All follow-ups</Link>}>
+            <TodoTable items={theyWait.slice(0, 10)} members={members} me={me.email} empty="Nobody is waiting." />
           </Card>
         </div>
 
-        <div className="space-y-6">
+        <div className="grid items-start gap-6 md:grid-cols-3">
           <Card title="Today's calendar" action={<Link href="/calendar" className="text-sm text-[var(--accent)]">Week</Link>}>
-            {(events ?? []).length === 0 ? <Empty>No meetings synced for today.</Empty> : (
+            {todaysEvents.length === 0 ? <Empty>No meetings synced for today.</Empty> : (
               <ul className="space-y-2">
-                {(events as CalendarEvent[]).map((e) => (
+                {todaysEvents.map((e) => (
                   <li key={e.id} className="flex gap-3 text-sm">
                     <span className="w-12 shrink-0 tabular-nums text-[var(--muted)]">{e.all_day ? "All day" : fmtTime(e.starts_at)}</span>
-                    <span>{e.title}{e.location && <span className="block text-xs text-[var(--muted)]">{e.location}</span>}</span>
+                    <span className="min-w-0">
+                      {e.url ? <a href={e.url} target="_blank" rel="noreferrer" className="hover:text-[var(--accent)]">{e.title}</a> : e.title}
+                      {trackedIds.has(e.id) && <span className="ml-1.5"><Badge t="ok">Tracked</Badge></span>}
+                      {e.location && <span className="block truncate text-xs text-[var(--muted)]">{fmtAddress(e.location)}</span>}
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -149,22 +178,43 @@ export default async function SummaryPage({ searchParams }: { searchParams: Prom
   );
 }
 
-function Group({ label, tasks, members, collapsed }: { label: string; tasks: Task[]; members: Parameters<typeof TaskRow>[0]["members"]; collapsed?: boolean }) {
-  if (tasks.length === 0) return null;
-  const body = <ul>{tasks.map((t) => <TaskRow key={t.id} task={t} members={members} />)}</ul>;
+function Group({ id, label, items, members, me, collapsed, empty }: {
+  id: string; label: string; items: TodoItem[]; members: Member[]; me: string; collapsed?: boolean; empty?: string;
+}) {
+  if (items.length === 0 && !empty) return null;
+  const heading = <>{label} <span className="font-normal">({items.length})</span></>;
+  const body = <TodoTable items={items} members={members} me={me} empty={empty} />;
   if (collapsed) {
     return (
-      <details className="mb-3">
-        <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">{label} ({tasks.length})</summary>
-        {body}
+      <details id={id} className="mb-4 scroll-mt-20">
+        <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">{heading}</summary>
+        <div className="mt-2">{body}</div>
       </details>
     );
   }
   return (
-    <div className="mb-4">
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">{label} ({tasks.length})</h3>
+    <div id={id} className="mb-5 scroll-mt-20">
+      <h3 className={`mb-1 text-xs font-semibold uppercase tracking-wide ${id === "overdue" ? "text-[var(--bad)]" : id === "today" ? "text-[var(--warn)]" : "text-[var(--muted)]"}`}>{heading}</h3>
       {body}
     </div>
+  );
+}
+
+function link(sp: Record<string, string | undefined>, patch: Record<string, string>) {
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries({ ...sp, ...patch })) if (v) p.set(k, v);
+  const q = p.toString();
+  return q ? `/?${q}` : "/";
+}
+
+function SortSelect({ sp, sort }: { sp: Record<string, string | undefined>; sort: SortKey }) {
+  return (
+    <span className="flex gap-1">
+      {SORTS.map((x) => (
+        <Link key={x.v} href={link(sp, { sort: x.v === "due" ? "" : x.v })}
+          className={`rounded-md px-2 py-1 ${sort === x.v ? "bg-[var(--accent-bg)] text-[var(--accent)] font-medium" : "hover:text-[var(--text)]"}`}>{x.l}</Link>
+      ))}
+    </span>
   );
 }
 

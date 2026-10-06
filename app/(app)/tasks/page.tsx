@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { requireMember } from "@/lib/session";
-import { endOfWeekISO, todayISO } from "@/lib/dates";
-import type { Client, Task } from "@/lib/types";
-import { Card, Empty, TaskRow, inputCls, btnGhost } from "@/components/ui";
+import { dayBoundsUTC, endOfWeekISO, todayISO } from "@/lib/dates";
+import type { CalendarEvent, Client, Task } from "@/lib/types";
+import { Card, inputCls, btnGhost } from "@/components/ui";
+import { SORTS, TodoTable, eventItem, sortItems, taskItem, type SortKey } from "@/components/todo";
 import { NewTaskForm } from "@/components/task-form";
 
 const VIEWS = [
@@ -22,7 +23,10 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
   const who = sp.who ?? "";
   const clientId = sp.client ?? "";
   const q = sp.q ?? "";
+  const urg = sp.u ?? "";
+  const sort = (SORTS.some((x) => x.v === sp.sort) ? sp.sort : view === "done" ? "newest" : "due") as SortKey;
   const today = todayISO();
+  const owner = members.find((m) => m.role === "owner")?.email ?? null;
 
   let query = supabase.from("tasks").select("*, clients(id,name)");
   query = view === "deleted" ? query.not("deleted_at", "is", null) : query.is("deleted_at", null);
@@ -35,18 +39,30 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
   if (who === "none") query = query.is("assignee", null);
   else if (who) query = query.eq("assignee", who);
   if (clientId) query = query.eq("client_id", clientId);
+  if (urg) query = query.eq("priority", urg);
   if (q) query = query.or(`title.ilike.%${q.replace(/[%,()]/g, " ")}%,details.ilike.%${q.replace(/[%,()]/g, " ")}%`);
   query = view === "done" ? query.order("completed_at", { ascending: false }).limit(200)
     : query.order("due_date", { ascending: true, nullsFirst: false }).order("created_at");
 
-  const [{ data: tasks, error }, { data: clients }] = await Promise.all([
+  const [dayStart, dayEnd] = dayBoundsUTC(today);
+  const showCalendar = (view === "today" || view === "open") && !q && !clientId && !urg && (!who || who === owner);
+  const [{ data: tasks, error }, { data: clients }, { data: events }, { data: tracked }] = await Promise.all([
     query,
     supabase.from("clients").select("id,name,kind,notes").is("deleted_at", null).order("name"),
+    showCalendar
+      ? supabase.from("calendar_events").select("*").gte("starts_at", dayStart).lte("starts_at", dayEnd).eq("declined", false).order("starts_at")
+      : Promise.resolve({ data: [] }),
+    supabase.from("tasks").select("source_ref").eq("source", "calendar").is("deleted_at", null).gte("due_date", today),
   ]);
   if (error) throw new Error(error.message);
+  const trackedIds = new Set((tracked ?? []).map((t: { source_ref: string }) => t.source_ref));
+  const items = sortItems([
+    ...((tasks ?? []) as Task[]).map(taskItem),
+    ...((events ?? []) as CalendarEvent[]).filter((e) => !trackedIds.has(e.id)).map((e) => eventItem(e, owner)),
+  ], sort);
 
   const link = (patch: Record<string, string>) => {
-    const p = new URLSearchParams({ view, who, client: clientId, q, ...patch });
+    const p = new URLSearchParams({ view, who, client: clientId, q, u: urg, sort: sp.sort ?? "", ...patch });
     for (const [k, v] of [...p.entries()]) if (!v) p.delete(k);
     return `/tasks?${p}`;
   };
@@ -81,13 +97,20 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
           <option value="">All clients</option>
           {(clients ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
-        <button className={btnGhost}>Filter</button>
+        <select name="u" defaultValue={urg} className={inputCls}>
+          <option value="">Any urgency</option>
+          <option value="urgent">Urgent</option><option value="medium">Medium</option><option value="low">Low</option>
+        </select>
+        <select name="sort" defaultValue={sp.sort ?? ""} className={inputCls}>
+          {SORTS.map((x) => <option key={x.v} value={x.v === "due" ? "" : x.v}>Sort: {x.l}</option>)}
+        </select>
+        <button className={btnGhost}>Apply</button>
+        {(q || who || clientId || urg || sp.sort) && <Link href={`/tasks?view=${view}`} className="self-center text-sm text-[var(--muted)]">Clear</Link>}
       </form>
 
       <Card>
-        {(tasks ?? []).length === 0 ? <Empty>No tasks here.</Empty> : (
-          <ul>{(tasks as Task[]).map((t) => <TaskRow key={t.id} task={t} members={members} />)}</ul>
-        )}
+        <TodoTable items={items} members={members} me={me.email} empty="No tasks here." />
+        <p className="mt-3 text-xs text-[var(--muted)]">{items.length} item{items.length === 1 ? "" : "s"}{showCalendar && (events ?? []).length > 0 ? " · today's calendar items are included; tick one to mark it done, or track it as a task" : ""}</p>
       </Card>
     </div>
   );
