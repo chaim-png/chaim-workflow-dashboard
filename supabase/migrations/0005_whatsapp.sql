@@ -15,7 +15,7 @@ create table public.whatsapp_numbers (
 
 create table public.whatsapp_settings (
   id boolean primary key default true check (id),
-  unsorted_hold_hours int not null default 0 check (unsorted_hold_hours between 0 and 168)
+  unsorted_hold_hours int not null default 72 check (unsorted_hold_hours between 0 and 168)
 );
 insert into public.whatsapp_settings default values;
 

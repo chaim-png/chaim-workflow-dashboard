@@ -59,7 +59,7 @@ Chaim's and Nadine's numbers run the WhatsApp Business app connected to Meta's C
 `whatsapp-webhook` edge function. Group chats are not available through coexistence.
 
 - **Privacy rule:** message text is stored only for contacts marked `client`. `unsorted` contacts
-  keep only name and number (text is kept for `whatsapp_settings.unsorted_hold_hours`, default 0,
+  keep only name and number (text is kept for `whatsapp_settings.unsorted_hold_hours`, default 72,
   then wiped). Nothing is stored for `personal` contacts, and marking a contact personal wipes its
   text. A trigger on `whatsapp_messages` enforces this whatever the writer does.
 - **Who sees what:** client chats are shared with the team; unsorted and personal contacts only
