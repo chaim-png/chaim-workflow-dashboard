@@ -5,6 +5,7 @@ import { nameForUser } from "@/lib/people";
 import { dueLabel, fmtDateTime, hhmm } from "@/lib/dates";
 import type { AuditEntry, Client, Task } from "@/lib/types";
 import { describeChange, fmtValue } from "@/lib/audit";
+import { EmailLinksCard, type EmailLink } from "@/components/email-links";
 import { addComment, deleteComment, deleteTask, restoreTask, updateTask } from "@/app/actions";
 import { Badge, Card, Empty, MemberSelect, SourceBadge, StatusBadge, UrgencyBadge, UrgencySelect, btnCls, btnGhost, inputCls } from "@/components/ui";
 
@@ -23,6 +24,10 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
   ]);
   if (!task) notFound();
   const t = task as Task;
+  const [{ data: emailLinks }, { data: clientEmailLinks }] = await Promise.all([
+    supabase.from("email_links").select("*").eq("task_id", id).order("last_at", { ascending: false }).limit(20),
+    t.client_id ? supabase.from("email_links").select("*").eq("client_id", t.client_id).order("last_at", { ascending: false }).limit(5) : Promise.resolve({ data: [] }),
+  ]);
   const commentIds = (comments ?? []).map((c) => c.id);
   const { data: commentHistory } = commentIds.length
     ? await supabase.from("audit_log").select("*").in("row_id", commentIds)
@@ -138,6 +143,8 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
           </Card>
         </div>
 
+        <div className="space-y-6">
+        <EmailLinksCard links={(emailLinks ?? []) as EmailLink[]} clientLinks={(clientEmailLinks ?? []) as EmailLink[]} members={members} />
         <Card title="History">
           {fullHistory.length === 0 ? <Empty>No changes recorded.</Empty> : (
             <ol className="space-y-3 text-sm">
@@ -157,6 +164,7 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
             </ol>
           )}
         </Card>
+        </div>
       </div>
     </div>
   );

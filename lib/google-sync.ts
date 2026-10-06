@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { accessTokenFor, googleConfigured, googleGet } from "@/lib/google";
 import { addDays, todayISO } from "@/lib/dates";
+import { matchThread, type MatchClient, type MatchFollowUp, type MatchTask } from "@/lib/email-match";
 
 const STALE_MINUTES = 10;
 
@@ -123,17 +124,18 @@ function decodeEntities(s: string) {
 async function syncGmail(supabase: SupabaseClient, token: string, email: string, lastSync: string | null) {
   // Look back to the previous pull (with an hour of overlap), or two days on the first run.
   const since = lastSync ? Date.parse(lastSync) - 3_600_000 : Date.now() - 2 * 86_400_000;
-  const q = `in:inbox -category:promotions -category:social -category:updates -category:forums after:${Math.floor(since / 1000)}`;
+  const q = `{in:inbox in:sent} -category:promotions -category:social -category:updates -category:forums after:${Math.floor(since / 1000)}`;
   const list = await googleGet<{ threads?: { id: string }[] }>(
     token,
-    `https://gmail.googleapis.com/gmail/v1/users/me/threads?${new URLSearchParams({ q, maxResults: "30" })}`,
+    `https://gmail.googleapis.com/gmail/v1/users/me/threads?${new URLSearchParams({ q, maxResults: "40" })}`,
   );
   const ids = (list.threads ?? []).map((t) => t.id);
   if (!ids.length) return 0;
+  const mailbox = email.toLowerCase();
 
   const { data: members } = await supabase.from("team_members").select("email").neq("role", "removed");
   const memberEmails = new Set((members ?? []).map((m: { email: string }) => m.email.toLowerCase()));
-  const team = new Set([...memberEmails, email.toLowerCase()]);
+  const team = new Set([...memberEmails, mailbox]);
 
   // Anything already on the dashboard for these threads is left alone.
   const known = new Set<string>();
@@ -142,11 +144,17 @@ async function syncGmail(supabase: SupabaseClient, token: string, email: string,
     (data ?? []).forEach((r: { source_ref: string }) => known.add(r.source_ref));
   }
 
-  const { data: clients } = await supabase.from("clients").select("name").is("deleted_at", null);
-  const clientNames = (clients ?? []).map((c: { name: string }) => c.name);
+  const [{ data: clients }, { data: openTasks }, { data: openFollowUps }] = await Promise.all([
+    supabase.from("clients").select("id,name").is("deleted_at", null),
+    supabase.from("tasks").select("id,title,client_id,source_ref").is("deleted_at", null).neq("status", "done"),
+    supabase.from("follow_ups").select("id,matter,client_id,contact_email,source_ref").is("deleted_at", null).eq("status", "open"),
+  ]);
+  const clientList = (clients ?? []) as MatchClient[];
+  const clientNames = clientList.map((c) => c.name);
 
   const rows = [];
-  for (const id of ids.filter((i) => !known.has(i))) {
+  const links = [];
+  for (const id of ids) {
     const metaHeaders = ["From", "To", "Cc", "Subject", "List-Unsubscribe", "List-Id"];
     const qs = new URLSearchParams({ format: "metadata" });
     metaHeaders.forEach((h) => qs.append("metadataHeaders", h));
@@ -161,24 +169,51 @@ async function syncGmail(supabase: SupabaseClient, token: string, email: string,
     const sourceDate = last.internalDate ? new Date(Number(last.internalDate)).toISOString() : null;
     const url = `https://mail.google.com/mail/?authuser=${encodeURIComponent(email)}#all/${id}`;
     const client = clientNames.find((n) => subject.toLowerCase().includes(n.toLowerCase())) ?? null;
+    const isList = msgs.some((m) => header(m, "List-Unsubscribe") || header(m, "List-Id"));
+    const weWroteLast = team.has(from.email) || labels.includes("SENT");
+
+    // Match the thread to the open tasks and follow-ups it is about (evidence only; nothing is changed).
+    if (!isList && !NOT_A_PERSON.test(from.email)) {
+      const participants = msgs.flatMap((m) => ["From", "To", "Cc"].flatMap((h) => header(m, h).split(",").map((a) => parseAddress(a).email))).filter(Boolean);
+      const matches = matchThread(
+        { id, subject, snippet, participants },
+        (openTasks ?? []) as MatchTask[], (openFollowUps ?? []) as MatchFollowUp[], clientList,
+      );
+      for (const m of matches) {
+        links.push({
+          mailbox, thread_id: id, subject, last_from: from.email, last_from_name: from.name, team_wrote_last: weWroteLast,
+          last_at: sourceDate, snippet, url, task_id: m.task_id ?? null, follow_up_id: m.follow_up_id ?? null,
+          client_id: m.client_id ?? null, matched_by: m.matched_by, updated_at: new Date().toISOString(),
+        });
+      }
+      // A thread that is already about an open task or follow-up doesn't need a new suggestion.
+      if (matches.some((m) => !m.client_id)) known.add(id);
+    }
+    if (known.has(id)) continue;
 
     // Property24 enquiries are leads to answer, even though they come from a no-reply address.
     if (/property24\.com$/.test(from.email) && /contact request/i.test(subject)) {
       const ref = subject.match(/P24-\d+/)?.[0] ?? "listing";
       rows.push({
         kind: "task", title: `Reply to Property24 enquiry ${ref}`, details: snippet,
-        client_name: client, suggested_assignee: memberEmails.has(email.toLowerCase()) ? email.toLowerCase() : null, suggested_due: addDays(todayISO(), 1),
+        client_name: client, suggested_assignee: memberEmails.has(mailbox) ? mailbox : null, suggested_due: addDays(todayISO(), 1),
         source: "email", source_ref: id, source_url: url, source_date: sourceDate,
       });
       continue;
     }
 
-    if (team.has(from.email) || labels.includes("SENT")) continue; // we wrote last
+    if (weWroteLast) continue; // we wrote last
     if (NOT_A_PERSON.test(from.email)) continue;
-    if (msgs.some((m) => header(m, "List-Unsubscribe") || header(m, "List-Id"))) continue; // newsletters, lists
+    if (isList) continue; // newsletters, lists
     const recipients = `${header(last, "To")},${header(last, "Cc")}`.toLowerCase();
     if (![...team].some((e) => recipients.includes(e))) continue; // broadcasts to group lists
     if (!labels.includes("UNREAD") && !labels.includes("IMPORTANT")) continue;
+
+    // The same email often reaches both Chaim and Nadine; each mailbox has its own thread id, so check by sender and subject.
+    const { count: dup } = await supabase.from("suggestions").select("id", { count: "exact", head: true })
+      .eq("contact_email", from.email).ilike("title", `%${subject.replace(/[%_]/g, "").slice(0, 80)}%`)
+      .gte("created_at", new Date(Date.now() - 14 * 86_400_000).toISOString());
+    if (dup) continue;
 
     const first = from.name.split(/\s+/)[0];
     rows.push({
@@ -190,9 +225,13 @@ async function syncGmail(supabase: SupabaseClient, token: string, email: string,
       contact_email: from.email,
       suggested_assignee: memberEmails.has("nadine@firzt.co.za") ? "nadine@firzt.co.za" : null,
       suggested_due: addDays(todayISO(), 1),
-      draft: `To: ${from.email}\nCc: ${email}\nSubject: Re: ${subject}\n\nHi ${first}\n\n\n\nThanks\nNadine`,
+      draft: `To: ${from.email}\nCc: ${mailbox === "nadine@firzt.co.za" ? "chaim@firzt.co.za" : email}\nSubject: Re: ${subject}\n\nHi ${first}\n\n\n\nThanks\nNadine`,
       source: "email", source_ref: id, source_url: url, source_date: sourceDate,
     });
+  }
+  if (links.length) {
+    const { error } = await supabase.from("email_links").upsert(links, { onConflict: "mailbox,thread_id,target" });
+    if (error) throw new Error(`Saving email matches failed: ${error.message}`);
   }
   if (!rows.length) return 0;
   const { data: inserted, error } = await supabase

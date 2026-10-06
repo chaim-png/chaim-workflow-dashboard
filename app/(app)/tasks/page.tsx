@@ -3,7 +3,7 @@ import { requireMember } from "@/lib/session";
 import { dayBoundsUTC, endOfWeekISO, todayISO } from "@/lib/dates";
 import type { CalendarEvent, Client, Task } from "@/lib/types";
 import { Card, inputCls, btnGhost } from "@/components/ui";
-import { SORTS, TodoTable, eventItem, sortItems, taskItem, type SortKey } from "@/components/todo";
+import { SORTS, TodoTable, eventItem, sortItems, taskItem, withEmails, type SortKey } from "@/components/todo";
 import { NewTaskForm } from "@/components/task-form";
 
 const VIEWS = [
@@ -56,10 +56,10 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
   ]);
   if (error) throw new Error(error.message);
   const trackedIds = new Set((tracked ?? []).map((t: { source_ref: string }) => t.source_ref));
-  const items = sortItems([
+  const items = sortItems(await withEmails(supabase, [
     ...((tasks ?? []) as Task[]).map(taskItem),
     ...((events ?? []) as CalendarEvent[]).filter((e) => !trackedIds.has(e.id)).map((e) => eventItem(e, owner)),
-  ], sort);
+  ], members), sort);
 
   const link = (patch: Record<string, string>) => {
     const p = new URLSearchParams({ view, who, client: clientId, q, u: urg, sort: sp.sort ?? "", ...patch });

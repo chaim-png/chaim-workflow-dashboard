@@ -9,6 +9,7 @@ import { describeChange, fmtValue } from "@/lib/audit";
 import { followUpToTask, updateFollowUp } from "@/app/actions";
 import { Badge, Card, Empty, MemberSelect, SourceBadge, UrgencyBadge, UrgencySelect, btnCls, btnGhost, inputCls } from "@/components/ui";
 import { CopyButton } from "@/components/copy-button";
+import { EmailLinksCard, type EmailLink } from "@/components/email-links";
 
 const FIELD_NAME: Record<string, string> = {
   next_action_on: "chase date", next_action_time: "chase time", contact_name: "contact", contact_email: "contact email",
@@ -25,6 +26,10 @@ export default async function FollowUpPage({ params }: { params: Promise<{ id: s
   ]);
   if (!row) notFound();
   const f = row as FollowUp & { created_by: string | null };
+  const [{ data: emailLinks }, { data: clientEmailLinks }] = await Promise.all([
+    supabase.from("email_links").select("*").eq("follow_up_id", id).order("last_at", { ascending: false }).limit(20),
+    f.client_id ? supabase.from("email_links").select("*").eq("client_id", f.client_id).order("last_at", { ascending: false }).limit(5) : Promise.resolve({ data: [] }),
+  ]);
   const clientNames = Object.fromEntries(((clients ?? []) as Client[]).map((c) => [c.id, c.name]));
   const due = dueLabel(f.next_action_on, f.next_action_time, f.status === "done");
   const age = daysSince(f.asked_on);
@@ -109,6 +114,8 @@ export default async function FollowUpPage({ params }: { params: Promise<{ id: s
           </Card>
         </div>
 
+        <div className="space-y-6">
+        <EmailLinksCard links={(emailLinks ?? []) as EmailLink[]} clientLinks={(clientEmailLinks ?? []) as EmailLink[]} members={members} />
         <Card title="History">
           {(history ?? []).length === 0 ? <Empty>No changes recorded.</Empty> : (
             <ol className="space-y-3 text-sm">
@@ -128,6 +135,7 @@ export default async function FollowUpPage({ params }: { params: Promise<{ id: s
             </ol>
           )}
         </Card>
+        </div>
       </div>
     </div>
   );

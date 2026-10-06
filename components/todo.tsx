@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { CalendarEvent, FollowUp, Member, Task, Urgency } from "@/lib/types";
-import { dueLabel, fmtAddress, fmtTime, localDate } from "@/lib/dates";
+import { dueLabel, fmtAddress, fmtDate, fmtTime, localDate } from "@/lib/dates";
 import { trackCalendarEvent, updateFollowUp, updateTask } from "@/app/actions";
 import { Badge, Person, STATUS_LABEL, URGENCY_RANK, UrgencyBadge } from "@/components/ui";
 
@@ -22,7 +22,31 @@ export type TodoItem = {
   status: string;
   done: boolean;
   created_at: string;
+  email?: { who: string; replied: boolean; at: string | null } | null;
 };
+
+type LinkRow = { task_id: string | null; follow_up_id: string | null; last_from: string | null; last_from_name: string | null; team_wrote_last: boolean; last_at: string | null };
+
+/** Adds the latest matched email (from either mailbox) to each task and follow-up row. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function withEmails(supabase: any, items: TodoItem[], members: Member[]): Promise<TodoItem[]> {
+  const taskIds = items.filter((i) => i.kind === "task").map((i) => i.id);
+  const fuIds = items.filter((i) => i.kind === "follow_up").map((i) => i.id);
+  if (!taskIds.length && !fuIds.length) return items;
+  const ors = [taskIds.length ? `task_id.in.(${taskIds.join(",")})` : null, fuIds.length ? `follow_up_id.in.(${fuIds.join(",")})` : null].filter(Boolean).join(",");
+  const { data } = await supabase.from("email_links").select("task_id,follow_up_id,last_from,last_from_name,team_wrote_last,last_at").or(ors);
+  const latest = new Map<string, LinkRow>();
+  for (const l of (data ?? []) as LinkRow[]) {
+    const key = l.task_id ?? l.follow_up_id!;
+    if (!latest.has(key) || (l.last_at ?? "") > (latest.get(key)!.last_at ?? "")) latest.set(key, l);
+  }
+  return items.map((i) => {
+    const l = latest.get(i.id);
+    if (!l) return i;
+    const who = members.find((m) => m.email === l.last_from)?.full_name.split(" ")[0] ?? l.last_from_name?.split(" ")[0] ?? l.last_from ?? "";
+    return { ...i, email: { who, replied: l.team_wrote_last, at: l.last_at } };
+  });
+}
 
 export function taskItem(t: Task): TodoItem {
   return {
@@ -108,6 +132,11 @@ function Row({ item: i, members, me, back }: { item: TodoItem; members: Member[]
           {i.kind === "follow_up" && <Badge t="warn">Follow-up</Badge>}
           {i.kind === "calendar" && <Badge t="info">Calendar</Badge>}
           {i.sub && <span className="truncate">{i.sub}</span>}
+          {i.email && (
+            <span className={i.email.replied ? "text-[var(--ok)]" : "text-[var(--warn)]"} title="Latest matched email">
+              ✉ {i.email.replied ? `${i.email.who} replied` : `${i.email.who} wrote`}{i.email.at ? ` ${fmtDate(i.email.at)}` : ""}
+            </span>
+          )}
           {i.kind === "calendar" && (
             <form action={trackCalendarEvent}>
               <input type="hidden" name="id" value={i.id} /><input type="hidden" name="mode" value="track" />

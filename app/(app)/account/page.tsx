@@ -32,8 +32,9 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
       <Card title="Gmail and Google Calendar">
         <div className="space-y-3 text-sm">
           <p className="text-[var(--muted)]">
-            Once connected, the dashboard reads your inbox and calendar (read-only) every time someone opens it, at most every 10 minutes.
-            New emails become suggestions that someone has to accept; nothing is sent.
+            Each person connects their own mailbox. Once connected, the dashboard reads your inbox, sent mail and calendar (read-only)
+            whenever someone opens it, at most every 10 minutes. Emails about an open task or follow-up are matched to it and shown on
+            its page; new ones become suggestions that someone has to accept. Nothing is ever sent from here.
           </p>
           {connections.length > 0 && (
             <ul className="space-y-1">

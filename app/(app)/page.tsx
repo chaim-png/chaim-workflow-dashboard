@@ -4,7 +4,7 @@ import { firstName } from "@/lib/people";
 import { addDays, dayBoundsUTC, endOfWeekISO, fmtAddress, fmtDate, fmtDateTime, fmtTime, todayISO } from "@/lib/dates";
 import type { CalendarEvent, FollowUp, Member, Suggestion, Task, AuditEntry } from "@/lib/types";
 import { Badge, Card, Empty, SourceBadge } from "@/components/ui";
-import { SORTS, TodoTable, eventItem, followUpItem, sortItems, taskItem, type SortKey, type TodoItem } from "@/components/todo";
+import { SORTS, TodoTable, eventItem, followUpItem, sortItems, taskItem, withEmails, type SortKey, type TodoItem } from "@/components/todo";
 import { describeChange } from "@/lib/audit";
 
 export default async function SummaryPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
@@ -55,7 +55,7 @@ export default async function SummaryPage({ searchParams }: { searchParams: Prom
       ? todaysEvents.filter((e) => !trackedIds.has(e.id)).map((e) => eventItem(e, owner))
       : []),
   ].filter((i) => urgOk(i.urgency) || i.kind === "calendar");
-  const sorted = sortItems(items, sort);
+  const sorted = sortItems(await withEmails(supabase, items, members), sort);
   const waitingTask = (i: TodoItem) => i.kind === "task" && i.status === "waiting";
   const overdue = sorted.filter((i) => i.due_date && i.due_date < today && !waitingTask(i));
   const dueToday = sorted.filter((i) => i.due_date === today && !waitingTask(i));
