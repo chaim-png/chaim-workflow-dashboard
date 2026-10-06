@@ -66,3 +66,7 @@ The dashboard reads Gmail and Calendar itself, read-only, through a Google OAuth
 - New threads become suggestions only (follow-ups with a draft for Nadine, or tasks for Property24 leads). Nothing is
   sent, and newsletters, no-reply senders, group broadcasts and threads already on the dashboard are skipped.
   Live pulls log to `sync_runs` as `gmail-live` / `calendar-live`, so the scheduled Claude sync keeps its own window.
+
+## Deploys
+
+The Vercel project is connected to this repo (Settings > Git); every push to `main` deploys to production. If the live site stops updating, check that the repository is still connected there.
