@@ -1,4 +1,4 @@
-export type Member = { email: string; full_name: string; role: string; user_id: string | null; color: string | null };
+export type Member = { email: string; full_name: string; role: string; user_id: string | null; color: string | null; daily_goal: number };
 
 export type Urgency = "low" | "medium" | "urgent";
 

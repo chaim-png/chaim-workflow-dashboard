@@ -29,8 +29,8 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
           <button className={btnCls}>Change password</button>
         </form>
       </Card>
-      <Card title="Colours">
-        <p className="mb-3 text-sm text-[var(--muted)]">Each person's colour, used on their initials and barometer bar.</p>
+      <Card title="Colours and daily goals">
+        <p className="mb-3 text-sm text-[var(--muted)]">Each person's colour (initials and barometer bar) and how many items they aim to finish a day. The bar turns gold when the goal is hit.</p>
         <div className="space-y-2">
           {members.map((m) => (
             <form key={m.email} action={setColour} className="flex items-center gap-3 text-sm">
@@ -38,6 +38,9 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
               <input type="color" name="color" defaultValue={memberColor(members, m.email).startsWith("#") ? memberColor(members, m.email) : "#2b6cb0"}
                 aria-label={`Colour for ${m.full_name}`} className="h-8 w-10 cursor-pointer rounded border border-[var(--line)] bg-transparent" />
               <span className="flex-1">{m.full_name}</span>
+              <label className="flex items-center gap-1.5 text-xs text-[var(--muted)]">Goal
+                <input type="number" name="goal" min={1} max={100} defaultValue={m.daily_goal ?? 8} className={`${inputCls} w-16`} />
+              </label>
               <button className={btnGhost}>Save</button>
             </form>
           ))}

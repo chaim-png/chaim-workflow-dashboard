@@ -6,6 +6,7 @@ import type { CalendarEvent, FollowUp, Member, Suggestion, Task, AuditEntry } fr
 import { Badge, Card, Empty, SourceBadge, memberColor } from "@/components/ui";
 import { SORTS, TodoTable, eventItem, followUpItem, sortItems, taskItem, withEmails, type SortKey, type TodoItem } from "@/components/todo";
 import { describeChange } from "@/lib/audit";
+import { Confetti } from "@/components/confetti";
 
 export default async function SummaryPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const { supabase, me, members } = await requireMember();
@@ -43,8 +44,8 @@ export default async function SummaryPage({ searchParams }: { searchParams: Prom
     supabase.from("follow_ups").select("assignee, next_action_on").is("deleted_at", null).eq("status", "open").lte("next_action_on", monthEnd),
   ]);
   const isToday = (ts: string | null) => !!ts && ts >= dayStart && ts <= dayEnd;
-  const people = [...members.map((m) => ({ email: m.email as string | null, name: m.full_name.split(" ")[0], color: memberColor(members, m.email) })),
-    { email: null, name: "Team", color: "var(--accent)" }];
+  const people = [...members.map((m) => ({ email: m.email as string | null, name: m.full_name.split(" ")[0], color: memberColor(members, m.email), goal: m.daily_goal ?? 8 })),
+    { email: null, name: "Team", color: "var(--accent)", goal: members.reduce((n, m) => n + (m.daily_goal ?? 8), 0) }];
   const meter = (done: number, left: number) => ({ done, left, pct: done + left ? Math.round((done / (done + left)) * 100) : null });
   const barometer = people.map((p) => {
     const mine = (r: { assignee: string | null }) => p.email === null || r.assignee === p.email;
@@ -83,14 +84,49 @@ export default async function SummaryPage({ searchParams }: { searchParams: Prom
   const meetingsMonth = (monthEvents ?? []).length;
   const fuClosedMonth = (fuDoneMonth ?? []).length;
   const doneTodayTeam = perDay.get(today) ?? 0;
-  const facts = [
+
+  // Week starts on Sunday (Shabbos is the day off).
+  const weekStart = addDays(today, -new Date(today + "T12:00:00Z").getUTCDay());
+  const [weekStartUTC] = dayBoundsUTC(weekStart);
+  const [{ data: weekTasks }, { data: weekFus }, { data: monthClosed }, { data: oldestOpen }, { data: links }] = await Promise.all([
+    supabase.from("tasks").select("client_id").is("deleted_at", null).eq("status", "done").gte("completed_at", weekStartUTC).not("client_id", "is", null),
+    supabase.from("follow_ups").select("client_id").is("deleted_at", null).eq("status", "done").gte("updated_at", weekStartUTC).not("client_id", "is", null),
+    supabase.from("tasks").select("title, created_at, completed_at").is("deleted_at", null).eq("status", "done").gte("completed_at", monthStartUTC),
+    supabase.from("tasks").select("id, title, created_at").is("deleted_at", null).neq("status", "done").order("created_at").limit(1),
+    supabase.from("email_links").select("thread_id, team_wrote_last, last_at"),
+  ]);
+  const clientsTouched = new Set([...(weekTasks ?? []), ...(weekFus ?? [])].map((r: { client_id: string }) => r.client_id)).size;
+  const span = (ms: number) => {
+    const h = ms / 3_600_000;
+    return h < 1 ? `${Math.max(1, Math.round(h * 60))} min` : h < 48 ? `${Math.round(h)} h` : `${Math.round(h / 24)} days`;
+  };
+  const fastest = ((monthClosed ?? []) as { title: string; created_at: string; completed_at: string }[])
+    .map((t) => ({ title: t.title, ms: new Date(t.completed_at).getTime() - new Date(t.created_at).getTime() }))
+    .filter((t) => t.ms >= 0).sort((a, b) => a.ms - b.ms)[0];
+  const oldest = (oldestOpen ?? [])[0] as { id: string; title: string; created_at: string } | undefined;
+  const oldestDays = oldest ? Math.floor((Date.now() - new Date(oldest.created_at).getTime()) / 86_400_000) : 0;
+  // One answer per thread: whoever wrote last on its newest link.
+  const threads = new Map<string, { team: boolean; at: string }>();
+  for (const l of (links ?? []) as { thread_id: string; team_wrote_last: boolean; last_at: string | null }[]) {
+    const prev = threads.get(l.thread_id);
+    if (!prev || (l.last_at ?? "") > prev.at) threads.set(l.thread_id, { team: l.team_wrote_last, at: l.last_at ?? "" });
+  }
+  const answered = [...threads.values()].filter((t) => t.team).length;
+  const waitingOnUs = threads.size - answered;
+  const cut = (t: string, n = 38) => (t.length > n ? t.slice(0, n - 1) + "…" : t);
+  const facts: { n: string | number; l: string; e: string; href?: string; title?: string }[] = [
     { n: doneTodayTeam, l: "done today", e: doneTodayTeam >= 5 ? "🚀" : doneTodayTeam ? "✅" : "☕" },
     { n: streak, l: streak === 1 ? "day streak" : "days streak", e: streak >= 3 ? "🔥" : "📆" },
     { n: best ? best[1] : 0, l: best ? `best day (${fmtDate(best[0])})` : "best day", e: "🏆" },
     { n: meetingsToday, l: meetingsToday === 1 ? "meeting today" : "meetings today", e: "🗓️" },
     { n: meetingsMonth, l: `meetings in ${monthName}`, e: "🤝" },
     { n: fuClosedMonth, l: "follow-ups closed", e: "📨" },
+    { n: clientsTouched, l: clientsTouched === 1 ? "client moved forward this week" : "clients moved forward this week", e: "🏠" },
+    { n: fastest ? span(fastest.ms) : "–", l: fastest ? `fastest close: ${cut(fastest.title, 30)}` : "fastest close this month", e: "⚡", title: fastest?.title },
+    { n: oldest ? `${oldestDays} days` : "–", l: oldest ? `oldest open: ${cut(oldest.title, 30)}` : "oldest open item", e: "🐢", href: oldest ? `/tasks/${oldest.id}` : undefined, title: oldest?.title },
+    { n: `${answered} / ${waitingOnUs}`, l: "emails answered / waiting on us", e: "✉️", href: "/follow-ups" },
   ];
+  const myToday = barometer.find((b) => b.email === me.email)?.today;
   const range = (sp.bar === "month" ? "month" : "today") as "today" | "month";
 
   const todaysEvents = ((events ?? []) as CalendarEvent[]).filter((e) => !e.declined);
@@ -168,6 +204,7 @@ export default async function SummaryPage({ searchParams }: { searchParams: Prom
         <div className="grid gap-4 sm:grid-cols-3">
           {barometer.map((b) => {
             const m = b[range];
+            const goalHit = range === "today" && m.done >= b.goal;
             return (
               <div key={b.name}>
                 <div className="mb-1 flex items-baseline justify-between text-sm">
@@ -178,23 +215,32 @@ export default async function SummaryPage({ searchParams }: { searchParams: Prom
                 </div>
                 <div className="h-2.5 overflow-hidden rounded-full bg-[var(--bg)]" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={m.pct ?? 0}
                   aria-label={`${b.name} completed ${range === "month" ? "this month" : "today"}`}>
-                  <div className="h-full rounded-full" style={{ width: `${m.pct ?? 0}%`, background: b.color }} />
+                  <div className="h-full rounded-full" style={{ width: `${goalHit ? 100 : m.pct ?? 0}%`, background: goalHit ? "#d69e2e" : b.color }} />
                 </div>
                 <div className="mt-1 text-xs text-[var(--muted)]">
                   {m.pct === null ? (range === "month" ? "Nothing due this month" : "Nothing due today") : `${m.pct}% complete`}
+                  {range === "today" && <span className={goalHit ? "ml-2 font-medium text-[#d69e2e]" : "ml-2"}>{goalHit ? `🏅 Goal hit (${m.done}/${b.goal})` : `🎯 ${m.done}/${b.goal} goal`}</span>}
                 </div>
               </div>
             );
           })}
         </div>
-        <div className="mt-4 grid grid-cols-2 gap-2 border-t border-[var(--line)] pt-4 sm:grid-cols-3 lg:grid-cols-6">
-          {facts.map((f) => (
-            <div key={f.l} className="rounded-xl bg-[var(--bg)] px-3 py-2">
-              <div className="text-lg font-semibold tabular-nums">{f.e} {f.n}</div>
-              <div className="text-xs text-[var(--muted)]">{f.l}</div>
-            </div>
-          ))}
+        <div className="mt-4 grid grid-cols-2 gap-2 border-t border-[var(--line)] pt-4 sm:grid-cols-3 lg:grid-cols-5">
+          {facts.map((f) => {
+            const inner = (
+              <>
+                <div className="text-lg font-semibold tabular-nums">{f.e} {f.n}</div>
+                <div className="truncate text-xs text-[var(--muted)]">{f.l}</div>
+              </>
+            );
+            return f.href ? (
+              <Link key={f.l} href={f.href} title={f.title} className="rounded-xl bg-[var(--bg)] px-3 py-2 hover:ring-1 hover:ring-[var(--accent)]">{inner}</Link>
+            ) : (
+              <div key={f.l} title={f.title} className="rounded-xl bg-[var(--bg)] px-3 py-2">{inner}</div>
+            );
+          })}
         </div>
+        <Confetti fire={!!myToday && myToday.done > 0 && myToday.left === 0} day={today} />
       </Card>
 
       <div className="space-y-6">

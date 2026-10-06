@@ -34,7 +34,13 @@ export async function disconnectGoogle() {
 
 export async function setColour(fd: FormData) {
   const supabase = await createClient();
-  const { error } = await supabase.rpc("set_member_color", { p_email: String(fd.get("email") ?? ""), p_color: String(fd.get("color") ?? "") });
+  const email = String(fd.get("email") ?? "");
+  const { error } = await supabase.rpc("set_member_color", { p_email: email, p_color: String(fd.get("color") ?? "") });
   if (error) redirect("/account?error=" + encodeURIComponent(error.message));
-  redirect("/account?notice=" + encodeURIComponent("Colour saved."));
+  const goal = Number(fd.get("goal"));
+  if (goal) {
+    const { error: e2 } = await supabase.rpc("set_member_goal", { p_email: email, p_goal: Math.round(goal) });
+    if (e2) redirect("/account?error=" + encodeURIComponent(e2.message));
+  }
+  redirect("/account?notice=" + encodeURIComponent("Saved."));
 }
