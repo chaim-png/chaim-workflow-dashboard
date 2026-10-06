@@ -287,6 +287,7 @@ export async function trackCalendarEvent(fd: FormData) {
       details: [e.location ? `Where: ${e.location}` : null, e.attendees ? `With: ${e.attendees}` : null].filter(Boolean).join("\n") || null,
       assignee: str(fd, "assignee"), due_date: day, due_time: time,
       status: mode === "done" ? "done" : "todo",
+      completed_at: mode === "done" ? new Date().toISOString() : null,
       source: "calendar", source_ref: id, source_url: e.url,
     })
     .select("id")

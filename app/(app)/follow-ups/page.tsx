@@ -15,7 +15,9 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
     supabase.from("clients").select("id,name").is("deleted_at", null).order("name"),
   ]);
   if (error) throw new Error(error.message);
-  const all = (data ?? []) as FollowUp[];
+  const rank = { urgent: 0, medium: 1, low: 2 } as const;
+  const all = ((data ?? []) as FollowUp[]).sort((a, b) =>
+    rank[a.urgency] - rank[b.urgency] || (a.next_action_on ?? "9999").localeCompare(b.next_action_on ?? "9999"));
   const theyWait = all.filter((f) => f.direction === "they_wait_on_us");
   const weWait = all.filter((f) => f.direction === "we_wait_on_them");
 

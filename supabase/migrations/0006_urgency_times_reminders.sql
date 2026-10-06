@@ -8,12 +8,14 @@ alter table public.tasks drop constraint tasks_priority_check;
 update public.tasks set priority = case priority when 'high' then 'urgent' when 'normal' then 'medium' else priority end
   where priority in ('high', 'normal');
 alter table public.tasks alter column priority set default 'medium';
-alter table public.tasks add constraint tasks_priority_check check (priority in ('low', 'medium', 'urgent'));
+-- The old values stay allowed until the new app is live; 0007 maps any stragglers and tightens this.
+alter table public.tasks add constraint tasks_priority_check check (priority in ('low', 'medium', 'urgent', 'normal', 'high'));
 alter table public.tasks add column due_time time;
 
 -- One task per calendar event or meeting action item.
 create unique index tasks_source_ref_once on public.tasks (source, source_ref)
-  where deleted_at is null and source in ('calendar', 'granola', 'plaud') and source_ref is not null;
+  where deleted_at is null and source_ref is not null
+    and (source = 'calendar' or (source in ('granola', 'plaud') and source_ref like '%:%'));
 
 -- Follow-ups: urgency and a time to chase.
 alter table public.follow_ups add column urgency text not null default 'medium' check (urgency in ('low', 'medium', 'urgent'));

@@ -32,6 +32,17 @@ export default async function SummaryPage({ searchParams }: { searchParams: Prom
       supabase.from("sync_runs").select("ran_at").order("ran_at", { ascending: false }).limit(1),
       supabase.from("tasks").select("source_ref").eq("source", "calendar").is("deleted_at", null).gte("due_date", today),
     ]);
+  const [{ data: doneToday }, { data: openDue }, { data: fuDoneToday }] = await Promise.all([
+    supabase.from("tasks").select("assignee").is("deleted_at", null).eq("status", "done").gte("completed_at", dayStart).lte("completed_at", dayEnd),
+    supabase.from("tasks").select("assignee").is("deleted_at", null).neq("status", "done").lte("due_date", today),
+    supabase.from("follow_ups").select("assignee").is("deleted_at", null).eq("status", "done").gte("updated_at", dayStart).lte("updated_at", dayEnd),
+  ]);
+  const barometer = [...members.map((m) => ({ email: m.email as string | null, name: m.full_name.split(" ")[0] })), { email: null, name: "Team" }].map((p) => {
+    const mine = (r: { assignee: string | null }) => p.email === null || r.assignee === p.email;
+    const done = (doneToday ?? []).filter(mine).length + (fuDoneToday ?? []).filter(mine).length;
+    const left = (openDue ?? []).filter(mine).length;
+    return { ...p, done, left, pct: done + left ? Math.round((done / (done + left)) * 100) : null };
+  });
 
   const todaysEvents = ((events ?? []) as CalendarEvent[]).filter((e) => !e.declined);
   const trackedIds = new Set((tracked ?? []).map((t: { source_ref: string }) => t.source_ref));
@@ -92,6 +103,23 @@ export default async function SummaryPage({ searchParams }: { searchParams: Prom
           </Link>
         ))}
       </div>
+
+      <Card title="Today's barometer" action={<span className="text-xs text-[var(--muted)]">done today vs still due today or overdue</span>}>
+        <div className="grid gap-4 sm:grid-cols-3">
+          {barometer.map((b) => (
+            <div key={b.name}>
+              <div className="mb-1 flex items-baseline justify-between text-sm">
+                <span className="font-medium">{b.name}</span>
+                <span className="tabular-nums text-[var(--muted)]">{b.done} done · {b.left} left</span>
+              </div>
+              <div className="h-2.5 overflow-hidden rounded-full bg-[var(--bg)]" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={b.pct ?? 0} aria-label={`${b.name} completed today`}>
+                <div className="h-full rounded-full" style={{ width: `${b.pct ?? 0}%`, background: (b.pct ?? 0) >= 75 ? "var(--ok)" : (b.pct ?? 0) >= 40 ? "var(--warn)" : "var(--bad)" }} />
+              </div>
+              <div className="mt-1 text-xs text-[var(--muted)]">{b.pct === null ? "Nothing due today" : `${b.pct}% complete`}</div>
+            </div>
+          ))}
+        </div>
+      </Card>
 
       <div className="space-y-6">
         <div className="space-y-6">

@@ -60,7 +60,7 @@ type GEvent = {
   htmlLink?: string;
   start?: { dateTime?: string; date?: string };
   end?: { dateTime?: string; date?: string };
-  attendees?: { email?: string; displayName?: string; self?: boolean }[];
+  attendees?: { email?: string; displayName?: string; self?: boolean; responseStatus?: string }[];
 };
 
 async function syncCalendar(supabase: SupabaseClient, token: string, email: string) {
@@ -91,6 +91,7 @@ async function syncCalendar(supabase: SupabaseClient, token: string, email: stri
         all_day: allDay,
         location: e.location ?? null,
         attendees: attendees || null,
+        declined: (e.attendees ?? []).some((a) => a.self && a.responseStatus === "declined"),
         url: e.htmlLink ? `${e.htmlLink}${e.htmlLink.includes("?") ? "&" : "?"}authuser=${encodeURIComponent(email)}` : null,
         synced_at: new Date().toISOString(),
       };
