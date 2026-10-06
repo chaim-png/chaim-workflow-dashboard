@@ -2,7 +2,8 @@ import Link from "next/link";
 import type { CalendarEvent, FollowUp, Member, Task, Urgency } from "@/lib/types";
 import { dueLabel, fmtAddress, fmtDate, fmtTime, localDate } from "@/lib/dates";
 import { trackCalendarEvent, updateFollowUp, updateTask } from "@/app/actions";
-import { Badge, Person, STATUS_LABEL, URGENCY_RANK, UrgencyBadge } from "@/components/ui";
+import { Badge, Person, STATUS_LABEL, URGENCY_RANK, UrgencyBadge, memberColor } from "@/components/ui";
+import { AssignSelect } from "@/components/assign-select";
 
 /** One row on any to-do list: a task, a follow-up, or a calendar item not yet tracked. */
 export type TodoItem = {
@@ -153,7 +154,10 @@ function Row({ item: i, members, me, back }: { item: TodoItem; members: Member[]
       </div>
       <div><Badge t={due.tone}>{due.text}</Badge></div>
       <div>{i.kind === "calendar" ? null : <UrgencyBadge u={i.urgency} />}</div>
-      <div><Person members={members} email={i.assignee} /></div>
+      <div>
+        {i.kind === "calendar" || i.done ? <Person members={members} email={i.assignee} />
+          : <AssignSelect kind={i.kind} id={i.id} assignee={i.assignee} members={members} color={memberColor(members, i.assignee)} back={back} />}
+      </div>
     </li>
   );
 }

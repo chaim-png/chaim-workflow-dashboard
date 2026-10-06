@@ -31,3 +31,10 @@ export async function disconnectGoogle() {
   if (error) redirect("/account?error=" + encodeURIComponent(error.message));
   redirect("/account?notice=" + encodeURIComponent("Google disconnected. The dashboard no longer reads your Gmail or Calendar."));
 }
+
+export async function setColour(fd: FormData) {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("set_member_color", { p_email: String(fd.get("email") ?? ""), p_color: String(fd.get("color") ?? "") });
+  if (error) redirect("/account?error=" + encodeURIComponent(error.message));
+  redirect("/account?notice=" + encodeURIComponent("Colour saved."));
+}

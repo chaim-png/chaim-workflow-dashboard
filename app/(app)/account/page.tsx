@@ -1,6 +1,6 @@
 import { requireMember } from "@/lib/session";
-import { Card, btnCls, btnGhost, inputCls } from "@/components/ui";
-import { changePassword, disconnectGoogle, syncGoogleNow } from "./actions";
+import { Card, btnCls, btnGhost, inputCls, memberColor } from "@/components/ui";
+import { changePassword, disconnectGoogle, setColour, syncGoogleNow } from "./actions";
 import { googleConfigured } from "@/lib/google";
 import { fmtDateTime } from "@/lib/dates";
 import { nameForUser } from "@/lib/people";
@@ -28,6 +28,20 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
           <input name="confirm" type="password" required minLength={8} placeholder="Repeat new password" className={`${inputCls} w-full`} autoComplete="new-password" />
           <button className={btnCls}>Change password</button>
         </form>
+      </Card>
+      <Card title="Colours">
+        <p className="mb-3 text-sm text-[var(--muted)]">Each person's colour, used on their initials and barometer bar.</p>
+        <div className="space-y-2">
+          {members.map((m) => (
+            <form key={m.email} action={setColour} className="flex items-center gap-3 text-sm">
+              <input type="hidden" name="email" value={m.email} />
+              <input type="color" name="color" defaultValue={memberColor(members, m.email).startsWith("#") ? memberColor(members, m.email) : "#2b6cb0"}
+                aria-label={`Colour for ${m.full_name}`} className="h-8 w-10 cursor-pointer rounded border border-[var(--line)] bg-transparent" />
+              <span className="flex-1">{m.full_name}</span>
+              <button className={btnGhost}>Save</button>
+            </form>
+          ))}
+        </div>
       </Card>
       <Card title="Gmail and Google Calendar">
         <div className="space-y-3 text-sm">

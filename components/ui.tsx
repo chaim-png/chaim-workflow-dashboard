@@ -83,13 +83,19 @@ export function UrgencySelect({ name = "urgency", defaultValue = "medium", class
 
 const AVATAR = ["#2f5d50", "#2b5a8a", "#8a5a00", "#7a3b69", "#a3302a"];
 
+/** The person's chosen colour, or a steady fallback from their email. */
+export function memberColor(members: Member[], email: string | null | undefined): string {
+  if (!email) return "var(--muted)";
+  return members.find((m) => m.email === email)?.color ?? AVATAR[[...email].reduce((a, c) => a + c.charCodeAt(0), 0) % AVATAR.length];
+}
+
 /** Initials chip plus first name, so the "who" column reads at a glance. */
 export function Person({ members, email }: { members: Member[]; email: string | null | undefined }) {
   if (!email) return <span className="text-xs text-[var(--muted)]">Unassigned</span>;
   const name = firstName(members, email);
   const full = members.find((m) => m.email === email)?.full_name ?? email;
   const initials = full.split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase();
-  const color = AVATAR[[...email].reduce((a, c) => a + c.charCodeAt(0), 0) % AVATAR.length];
+  const color = memberColor(members, email);
   return (
     <span className="inline-flex items-center gap-1.5 text-sm" title={full}>
       <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-[10px] font-semibold text-white" style={{ background: color }}>{initials}</span>

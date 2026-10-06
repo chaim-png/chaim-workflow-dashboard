@@ -3,7 +3,7 @@ import { requireMember } from "@/lib/session";
 import { firstName } from "@/lib/people";
 import { addDays, dayBoundsUTC, endOfWeekISO, fmtAddress, fmtDate, fmtDateTime, fmtTime, todayISO } from "@/lib/dates";
 import type { CalendarEvent, FollowUp, Member, Suggestion, Task, AuditEntry } from "@/lib/types";
-import { Badge, Card, Empty, SourceBadge } from "@/components/ui";
+import { Badge, Card, Empty, SourceBadge, memberColor } from "@/components/ui";
 import { SORTS, TodoTable, eventItem, followUpItem, sortItems, taskItem, withEmails, type SortKey, type TodoItem } from "@/components/todo";
 import { describeChange } from "@/lib/audit";
 
@@ -32,17 +32,35 @@ export default async function SummaryPage({ searchParams }: { searchParams: Prom
       supabase.from("sync_runs").select("ran_at").order("ran_at", { ascending: false }).limit(1),
       supabase.from("tasks").select("source_ref").eq("source", "calendar").is("deleted_at", null).gte("due_date", today),
     ]);
-  const [{ data: doneToday }, { data: openDue }, { data: fuDoneToday }] = await Promise.all([
-    supabase.from("tasks").select("assignee").is("deleted_at", null).eq("status", "done").gte("completed_at", dayStart).lte("completed_at", dayEnd),
-    supabase.from("tasks").select("assignee").is("deleted_at", null).neq("status", "done").lte("due_date", today),
-    supabase.from("follow_ups").select("assignee").is("deleted_at", null).eq("status", "done").gte("updated_at", dayStart).lte("updated_at", dayEnd),
+  const monthStart = today.slice(0, 8) + "01";
+  const monthEnd = addDays(addDays(monthStart, 32).slice(0, 8) + "01", -1);
+  const [monthStartUTC] = dayBoundsUTC(monthStart);
+  // Everything done this month (today is a subset), and what is still open and due by the end of the month.
+  const [{ data: doneMonth }, { data: openMonth }, { data: fuDoneMonth }, { data: fuOpenMonth }] = await Promise.all([
+    supabase.from("tasks").select("assignee, completed_at").is("deleted_at", null).eq("status", "done").gte("completed_at", monthStartUTC),
+    supabase.from("tasks").select("assignee, due_date").is("deleted_at", null).neq("status", "done").lte("due_date", monthEnd),
+    supabase.from("follow_ups").select("assignee, updated_at").is("deleted_at", null).eq("status", "done").gte("updated_at", monthStartUTC),
+    supabase.from("follow_ups").select("assignee, next_action_on").is("deleted_at", null).eq("status", "open").lte("next_action_on", monthEnd),
   ]);
-  const barometer = [...members.map((m) => ({ email: m.email as string | null, name: m.full_name.split(" ")[0] })), { email: null, name: "Team" }].map((p) => {
+  const isToday = (ts: string | null) => !!ts && ts >= dayStart && ts <= dayEnd;
+  const people = [...members.map((m) => ({ email: m.email as string | null, name: m.full_name.split(" ")[0], color: memberColor(members, m.email) })),
+    { email: null, name: "Team", color: "var(--accent)" }];
+  const meter = (done: number, left: number) => ({ done, left, pct: done + left ? Math.round((done / (done + left)) * 100) : null });
+  const barometer = people.map((p) => {
     const mine = (r: { assignee: string | null }) => p.email === null || r.assignee === p.email;
-    const done = (doneToday ?? []).filter(mine).length + (fuDoneToday ?? []).filter(mine).length;
-    const left = (openDue ?? []).filter(mine).length;
-    return { ...p, done, left, pct: done + left ? Math.round((done / (done + left)) * 100) : null };
+    const tasksDone = (doneMonth ?? []).filter(mine) as { completed_at: string | null }[];
+    const fuDone = (fuDoneMonth ?? []).filter(mine) as { updated_at: string | null }[];
+    const tasksOpen = (openMonth ?? []).filter(mine) as { due_date: string | null }[];
+    const fuOpen = (fuOpenMonth ?? []).filter(mine) as { next_action_on: string | null }[];
+    return {
+      ...p,
+      today: meter(tasksDone.filter((r) => isToday(r.completed_at)).length + fuDone.filter((r) => isToday(r.updated_at)).length,
+        tasksOpen.filter((r) => r.due_date! <= today).length + fuOpen.filter((r) => r.next_action_on! <= today).length),
+      month: meter(tasksDone.length + fuDone.length, tasksOpen.length + fuOpen.length),
+    };
   });
+  const range = (sp.bar === "month" ? "month" : "today") as "today" | "month";
+  const monthName = new Date(today + "T12:00:00Z").toLocaleString("en-ZA", { month: "long", timeZone: "UTC" });
 
   const todaysEvents = ((events ?? []) as CalendarEvent[]).filter((e) => !e.declined);
   const trackedIds = new Set((tracked ?? []).map((t: { source_ref: string }) => t.source_ref));
@@ -104,20 +122,39 @@ export default async function SummaryPage({ searchParams }: { searchParams: Prom
         ))}
       </div>
 
-      <Card title="Today's barometer" action={<span className="text-xs text-[var(--muted)]">done today vs still due today or overdue</span>}>
+      <Card
+        title={range === "month" ? `${monthName} barometer` : "Today's barometer"}
+        action={
+          <span className="flex gap-1 text-sm">
+            <Link href={link(sp, { bar: "" })} className={pill(range === "today")}>Today</Link>
+            <Link href={link(sp, { bar: "month" })} className={pill(range === "month")}>This month</Link>
+          </span>
+        }
+      >
+        <p className="-mt-1 mb-3 text-xs text-[var(--muted)]">
+          {range === "month" ? `Done since 1 ${monthName} vs still open and due by month end` : "Done today vs still due today or overdue"}
+        </p>
         <div className="grid gap-4 sm:grid-cols-3">
-          {barometer.map((b) => (
-            <div key={b.name}>
-              <div className="mb-1 flex items-baseline justify-between text-sm">
-                <span className="font-medium">{b.name}</span>
-                <span className="tabular-nums text-[var(--muted)]">{b.done} done · {b.left} left</span>
+          {barometer.map((b) => {
+            const m = b[range];
+            return (
+              <div key={b.name}>
+                <div className="mb-1 flex items-baseline justify-between text-sm">
+                  <span className="flex items-center gap-1.5 font-medium">
+                    <span className="h-2.5 w-2.5 rounded-full" style={{ background: b.color }} aria-hidden />{b.name}
+                  </span>
+                  <span className="tabular-nums text-[var(--muted)]">{m.done} done · {m.left} left</span>
+                </div>
+                <div className="h-2.5 overflow-hidden rounded-full bg-[var(--bg)]" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={m.pct ?? 0}
+                  aria-label={`${b.name} completed ${range === "month" ? "this month" : "today"}`}>
+                  <div className="h-full rounded-full" style={{ width: `${m.pct ?? 0}%`, background: b.color }} />
+                </div>
+                <div className="mt-1 text-xs text-[var(--muted)]">
+                  {m.pct === null ? (range === "month" ? "Nothing due this month" : "Nothing due today") : `${m.pct}% complete`}
+                </div>
               </div>
-              <div className="h-2.5 overflow-hidden rounded-full bg-[var(--bg)]" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={b.pct ?? 0} aria-label={`${b.name} completed today`}>
-                <div className="h-full rounded-full" style={{ width: `${b.pct ?? 0}%`, background: (b.pct ?? 0) >= 75 ? "var(--ok)" : (b.pct ?? 0) >= 40 ? "var(--warn)" : "var(--bad)" }} />
-              </div>
-              <div className="mt-1 text-xs text-[var(--muted)]">{b.pct === null ? "Nothing due today" : `${b.pct}% complete`}</div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </Card>
 
