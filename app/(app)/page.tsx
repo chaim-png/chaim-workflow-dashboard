@@ -59,8 +59,39 @@ export default async function SummaryPage({ searchParams }: { searchParams: Prom
       month: meter(tasksDone.length + fuDone.length, tasksOpen.length + fuOpen.length),
     };
   });
-  const range = (sp.bar === "month" ? "month" : "today") as "today" | "month";
   const monthName = new Date(today + "T12:00:00Z").toLocaleString("en-ZA", { month: "long", timeZone: "UTC" });
+  // Fun facts for the barometer: streak, best day, meetings, follow-ups closed.
+  const [monthEndUTC] = dayBoundsUTC(addDays(monthEnd, 1));
+  const [{ data: recentDone }, { data: monthEvents }] = await Promise.all([
+    supabase.from("tasks").select("completed_at").is("deleted_at", null).eq("status", "done").gte("completed_at", dayBoundsUTC(addDays(today, -60))[0]),
+    supabase.from("calendar_events").select("starts_at").eq("declined", false).gte("starts_at", monthStartUTC).lt("starts_at", monthEndUTC),
+  ]);
+  const localDay = (ts: string) => new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Johannesburg" }).format(new Date(ts));
+  const perDay = new Map<string, number>();
+  for (const r of (recentDone ?? []) as { completed_at: string | null }[]) {
+    if (r.completed_at) perDay.set(localDay(r.completed_at), (perDay.get(localDay(r.completed_at)) ?? 0) + 1);
+  }
+  // Working days in a row (Saturday skipped) with at least one task done; today only counts once something is done.
+  let streak = 0;
+  for (let d = perDay.get(today) ? today : addDays(today, -1), i = 0; i < 60; i++, d = addDays(d, -1)) {
+    if (new Date(d + "T12:00:00Z").getUTCDay() === 6) continue;
+    if (!perDay.get(d)) break;
+    streak++;
+  }
+  const best = [...perDay].filter(([d]) => d >= monthStart).sort((a, b) => b[1] - a[1])[0];
+  const meetingsToday = ((events ?? []) as CalendarEvent[]).filter((e) => !e.declined).length;
+  const meetingsMonth = (monthEvents ?? []).length;
+  const fuClosedMonth = (fuDoneMonth ?? []).length;
+  const doneTodayTeam = perDay.get(today) ?? 0;
+  const facts = [
+    { n: doneTodayTeam, l: "done today", e: doneTodayTeam >= 5 ? "🚀" : doneTodayTeam ? "✅" : "☕" },
+    { n: streak, l: streak === 1 ? "day streak" : "days streak", e: streak >= 3 ? "🔥" : "📆" },
+    { n: best ? best[1] : 0, l: best ? `best day (${fmtDate(best[0])})` : "best day", e: "🏆" },
+    { n: meetingsToday, l: meetingsToday === 1 ? "meeting today" : "meetings today", e: "🗓️" },
+    { n: meetingsMonth, l: `meetings in ${monthName}`, e: "🤝" },
+    { n: fuClosedMonth, l: "follow-ups closed", e: "📨" },
+  ];
+  const range = (sp.bar === "month" ? "month" : "today") as "today" | "month";
 
   const todaysEvents = ((events ?? []) as CalendarEvent[]).filter((e) => !e.declined);
   const trackedIds = new Set((tracked ?? []).map((t: { source_ref: string }) => t.source_ref));
@@ -155,6 +186,14 @@ export default async function SummaryPage({ searchParams }: { searchParams: Prom
               </div>
             );
           })}
+        </div>
+        <div className="mt-4 grid grid-cols-2 gap-2 border-t border-[var(--line)] pt-4 sm:grid-cols-3 lg:grid-cols-6">
+          {facts.map((f) => (
+            <div key={f.l} className="rounded-xl bg-[var(--bg)] px-3 py-2">
+              <div className="text-lg font-semibold tabular-nums">{f.e} {f.n}</div>
+              <div className="text-xs text-[var(--muted)]">{f.l}</div>
+            </div>
+          ))}
         </div>
       </Card>
 
