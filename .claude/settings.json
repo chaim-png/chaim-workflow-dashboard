@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__Gmail__search_threads",
+      "mcp__Gmail__get_thread",
+      "mcp__Gmail__get_message",
+      "mcp__Gmail__send_message",
+      "mcp__Google_Calendar__list_events",
+      "mcp__Google_Calendar__get_event",
+      "mcp__Granola__list_meetings",
+      "mcp__Granola__get_meetings",
+      "mcp__Granola__search_meetings",
+      "mcp__Plaud__list_files",
+      "mcp__Plaud__get_file",
+      "mcp__Plaud__get_note",
+      "mcp__Plaud__get_transcript",
+      "mcp__Supabase__execute_sql"
+    ]
+  }
+}
